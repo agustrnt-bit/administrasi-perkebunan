@@ -180,6 +180,55 @@ type Bootstrap = {
 type Tab = 'dashboard' | 'tbs' | 'work' | 'purchases' | 'inventory' | 'payroll' | 'employeeReceivables' | 'transactions' | 'accounting' | 'reports' | 'master' | 'access';
 const mainTabStorageKey = 'perkebunan.navigation.tab';
 const mainTabOptions: readonly Tab[] = ['dashboard', 'tbs', 'work', 'purchases', 'inventory', 'payroll', 'employeeReceivables', 'transactions', 'accounting', 'reports', 'master', 'access'];
+const companySessionKey = 'perkebunan.company.selected';
+const tabPathMap: Record<Tab, string> = {
+  dashboard: '/dashboard',
+  tbs: '/tbs',
+  work: '/work',
+  purchases: '/purchase',
+  inventory: '/inventory',
+  payroll: '/payroll',
+  employeeReceivables: '/employee-receivables',
+  transactions: '/cash-bank',
+  accounting: '/accounting',
+  reports: '/reports',
+  master: '/master',
+  access: '/company',
+};
+const pathTabMap: Record<string, Tab> = {
+  dashboard: 'dashboard',
+  tbs: 'tbs',
+  work: 'work',
+  purchase: 'purchases',
+  purchases: 'purchases',
+  inventory: 'inventory',
+  payroll: 'payroll',
+  'employee-receivables': 'employeeReceivables',
+  receivables: 'employeeReceivables',
+  'cash-bank': 'transactions',
+  transactions: 'transactions',
+  accounting: 'accounting',
+  reports: 'reports',
+  master: 'master',
+  company: 'access',
+};
+function tabFromPath(pathname: string): Tab | null {
+  const segment = pathname.replace(/^\/+|\/+$/g, '').split('/')[0]?.toLowerCase() || '';
+  return segment ? pathTabMap[segment] || null : null;
+}
+function pathForTab(tab: Tab) { return tabPathMap[tab] || '/dashboard'; }
+function readCompanySession() {
+  if (typeof window === 'undefined') return '';
+  try { return window.sessionStorage.getItem(companySessionKey) || ''; } catch { return ''; }
+}
+function storeCompanySession(workspaceId: string) {
+  if (typeof window === 'undefined') return;
+  try { window.sessionStorage.setItem(companySessionKey, workspaceId); } catch { /* no-op */ }
+}
+function clearCompanySession() {
+  if (typeof window === 'undefined') return;
+  try { window.sessionStorage.removeItem(companySessionKey); } catch { /* no-op */ }
+}
 
 type CashAllocationForm = { accountId: string; kebunId: string; amount: string; memo: string; search: string };
 type TransactionForm = {
@@ -274,12 +323,20 @@ function canManagePayroll(value: Role) {
 function canManageAccounting(value: Role) {
   return value === 'OWNER' || value === 'ADMIN_PUSAT' || value === 'FINANCE';
 }
+function canOpenTab(tab: Tab, role: Role) {
+  if (tab === 'master') return canManageMaster(role);
+  if (tab === 'employeeReceivables') return canManagePayroll(role);
+  if (tab === 'purchases' || tab === 'accounting') return canManageAccounting(role);
+  return true;
+}
 
 function FarmApp() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<Bootstrap>(emptyData);
   const [tab, setTab] = useState<Tab>(() => {
+    const routed = typeof window !== 'undefined' ? tabFromPath(window.location.pathname) : null;
+    if (routed) return routed;
     const stored = readStoredChoice(mainTabStorageKey, mainTabOptions, 'dashboard');
     return stored === 'payables' ? 'purchases' : stored;
   }); 
@@ -305,12 +362,16 @@ function FarmApp() {
       }
       const completeData: Bootstrap = { ...nextData, transactions: allTransactions, transactionsNextToken: '' };
       setData(completeData);
-      const storedTab = readStoredChoice(mainTabStorageKey, mainTabOptions, 'dashboard');
-      const restrictedTab = (storedTab === 'master' && !canManageMaster(completeData.workspace.role)) || ((storedTab === 'employeeReceivables' || storedTab === 'purchases' || storedTab === 'accounting') && !canManageAccounting(completeData.workspace.role));
-      setTab(restrictedTab ? 'dashboard' : storedTab);
+      const routedTab = typeof window !== 'undefined' ? tabFromPath(window.location.pathname) : null;
+      const storedTab = routedTab || readStoredChoice(mainTabStorageKey, mainTabOptions, 'dashboard');
+      const nextTab = canOpenTab(storedTab, completeData.workspace.role) ? storedTab : 'dashboard';
+      setTab(nextTab);
+      storeChoice(mainTabStorageKey, nextTab);
       setErrorMessage('');
+      return completeData;
     } catch (err) {
       setErrorMessage(apiError(err, 'Data belum bisa dimuat. Silakan coba lagi.'));
+      return null;
     }
   };
 
@@ -320,7 +381,17 @@ function FarmApp() {
         const current = await auth.getUser();
         if (current) {
           setUser(current as User);
-          await loadData();
+          let loaded = await loadData();
+          const selectedWorkspaceId = readCompanySession();
+          if (loaded && selectedWorkspaceId && loaded.workspaces.some(item => item.id === selectedWorkspaceId)) {
+            if (loaded.workspace.id !== selectedWorkspaceId) {
+              await api.post('/api/workspace/switch', { workspaceId: selectedWorkspaceId });
+              loaded = await loadData();
+            }
+            if (loaded) setCompanySelected(true);
+          } else {
+            clearCompanySession();
+          }
         }
       } finally {
         setLoading(false);
@@ -333,6 +404,8 @@ function FarmApp() {
     try {
       setLoading(true);
       setErrorMessage('');
+      clearCompanySession();
+      setCompanySelected(false);
       const result = await auth.signIn(credentials);
       setUser(result.user as User);
       await loadData();
@@ -343,9 +416,17 @@ function FarmApp() {
     }
   };
 
-  const navigate = (nextTab: Tab) => {
-    setTab(nextTab);
-    storeChoice(mainTabStorageKey, nextTab);
+  const navigate = (nextTab: Tab, options?: { replace?: boolean }) => {
+    const allowedTab = canOpenTab(nextTab, data.workspace.role) ? nextTab : 'dashboard';
+    setTab(allowedTab);
+    storeChoice(mainTabStorageKey, allowedTab);
+    if (typeof window !== 'undefined') {
+      const nextPath = pathForTab(allowedTab);
+      if (window.location.pathname !== nextPath) {
+        if (options?.replace) window.history.replaceState({ tab: allowedTab }, '', nextPath);
+        else window.history.pushState({ tab: allowedTab }, '', nextPath);
+      }
+    }
   };
 
   const selectCompany = async (workspaceId: string) => {
@@ -353,9 +434,13 @@ function FarmApp() {
       setLoading(true);
       setErrorMessage('');
       if (workspaceId !== data.workspace.id) await api.post('/api/workspace/switch', { workspaceId });
-      await loadData();
-      navigate('dashboard');
+      const loaded = await loadData();
+      if (!loaded) return;
+      storeCompanySession(workspaceId);
       setCompanySelected(true);
+      const requestedTab = typeof window !== 'undefined' ? tabFromPath(window.location.pathname) : null;
+      const targetTab = requestedTab && canOpenTab(requestedTab, loaded.workspace.role) ? requestedTab : 'dashboard';
+      navigate(targetTab, { replace: !requestedTab });
     } catch (err) {
       setErrorMessage(apiError(err, 'Perusahaan belum dapat dibuka.'));
     } finally {
@@ -368,9 +453,11 @@ function FarmApp() {
       setLoading(true);
       setErrorMessage('');
       await api.post('/api/workspace/create', { name });
-      await loadData();
-      navigate('dashboard');
+      const loaded = await loadData();
+      if (!loaded) return;
+      storeCompanySession(loaded.workspace.id);
       setCompanySelected(true);
+      navigate('dashboard', { replace: true });
     } catch (err) {
       setErrorMessage(apiError(err, 'Perusahaan baru belum dapat dibuat.'));
     } finally {
@@ -385,9 +472,11 @@ function FarmApp() {
       setLoading(true);
       setErrorMessage('');
       await api.post('/api/workspace/join', { code: inviteCode });
-      await loadData();
-      navigate('dashboard');
+      const loaded = await loadData();
+      if (!loaded) return;
+      storeCompanySession(loaded.workspace.id);
       setCompanySelected(true);
+      navigate('dashboard', { replace: true });
     } catch (err) {
       setErrorMessage(apiError(err, 'Kode undangan perusahaan belum dapat digunakan.'));
     } finally {
@@ -397,11 +486,40 @@ function FarmApp() {
 
   const signOut = async () => {
     await auth.signOut();
+    clearCompanySession();
     setUser(null);
     setData(emptyData);
     setCompanySelected(false);
-    navigate('dashboard');
+    setTab('dashboard');
+    storeChoice(mainTabStorageKey, 'dashboard');
+    if (typeof window !== 'undefined') window.history.replaceState({}, '', '/');
   };
+
+  useEffect(() => {
+    if (!user || !companySelected || typeof window === 'undefined') return;
+    const routed = tabFromPath(window.location.pathname);
+    const nextTab = routed && canOpenTab(routed, data.workspace.role) ? routed : tab;
+    const safeTab = canOpenTab(nextTab, data.workspace.role) ? nextTab : 'dashboard';
+    if (tab !== safeTab) setTab(safeTab);
+    storeChoice(mainTabStorageKey, safeTab);
+    const canonicalPath = pathForTab(safeTab);
+    if (window.location.pathname !== canonicalPath) window.history.replaceState({ tab: safeTab }, '', canonicalPath);
+  }, [user, companySelected, data.workspace.role]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      if (!user || !companySelected) return;
+      const routed = tabFromPath(window.location.pathname) || 'dashboard';
+      const safeTab = canOpenTab(routed, data.workspace.role) ? routed : 'dashboard';
+      setTab(safeTab);
+      storeChoice(mainTabStorageKey, safeTab);
+      const canonicalPath = pathForTab(safeTab);
+      if (window.location.pathname !== canonicalPath) window.history.replaceState({ tab: safeTab }, '', canonicalPath);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [user, companySelected, data.workspace.role]);
 
   const flash = (text: string) => {
     setMessage(text);
@@ -445,7 +563,7 @@ function FarmApp() {
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Sprout size={24} /></div>
-            <div><strong>Administrasi</strong><span>Perkebunan · v4.13.1</span></div>
+            <div><strong>Administrasi</strong><span>Perkebunan · v4.14.0</span></div>
         </div>
         <button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Tutup menu">
           <X size={20} />
@@ -485,7 +603,7 @@ function FarmApp() {
             <h1>{navItems.find(item => item.id === tab)?.label || 'Administrasi Perkebunan'}</h1>
             <p>{data.workspace.name} · {roleLabel(data.workspace.role)}</p>
           </div>
-          <div className="topbar-actions"><button className="company-switch-btn" onClick={() => setCompanySelected(false)}><Building2 size={16} /> <span>Ganti Perusahaan</span></button><button className="refresh-btn" onClick={loadData}><RefreshCw size={16} /> <span>Refresh</span></button></div>
+          <div className="topbar-actions"><button className="company-switch-btn" onClick={() => { clearCompanySession(); setCompanySelected(false); }}><Building2 size={16} /> <span>Ganti Perusahaan</span></button><button className="refresh-btn" onClick={loadData}><RefreshCw size={16} /> <span>Refresh</span></button></div>
         </header>
         {message && <div className="toast success">{message}</div>}
         {errorMessage && (
@@ -2124,3 +2242,6 @@ export default FarmApp;
 /* v4.12.2 fix company selector state */
 
 /* v4.13 multi-unit inventory */
+
+
+/* v4.14.0 url routing and company session */

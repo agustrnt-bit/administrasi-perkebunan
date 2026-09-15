@@ -146,12 +146,12 @@ function apiError(err: unknown, fallback: string) {
 }
 function blankPurchaseLine(kebunId = '') {
   return {
-    kind: 'SERVICE' as 'SERVICE' | 'INVENTORY',
+    kind: 'INVENTORY' as 'SERVICE' | 'INVENTORY',
     itemId: '',
     kebunId,
     description: '',
     quantity: '1',
-    unit: 'jasa',
+    unit: '',
     unitId: '',
     unitPrice: '',
     debitAccountId: '',
@@ -1330,3 +1330,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 
 /* v4.13 multi-unit purchase */
+
+
+/* v4.13.2 default purchase inventory */
