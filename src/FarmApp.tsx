@@ -342,6 +342,7 @@ function FarmApp() {
   }); 
   const [mobileMenu, setMobileMenu] = useState(false);
   const [companySelected, setCompanySelected] = useState(false);
+  const [restoringSession, setRestoringSession] = useState(true);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -394,6 +395,7 @@ function FarmApp() {
           }
         }
       } finally {
+        setRestoringSession(false);
         setLoading(false);
       }
     };
@@ -526,7 +528,7 @@ function FarmApp() {
     window.setTimeout(() => setMessage(''), 2800);
   };
 
-  if (loading && !user) return <Splash />;
+  if (restoringSession || (loading && !user)) return <Splash />;
   if (!user) return <Login onLogin={signIn} error={errorMessage} />;
   if (!companySelected) return (
     <CompanySelector
@@ -563,7 +565,7 @@ function FarmApp() {
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Sprout size={24} /></div>
-            <div><strong>Administrasi</strong><span>Perkebunan · v4.14.0</span></div>
+            <div><strong>Administrasi</strong><span>Perkebunan · v4.14.1</span></div>
         </div>
         <button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Tutup menu">
           <X size={20} />
@@ -2245,3 +2247,6 @@ export default FarmApp;
 
 
 /* v4.14.0 url routing and company session */
+
+
+/* v4.14.1 refresh session restore splash */
