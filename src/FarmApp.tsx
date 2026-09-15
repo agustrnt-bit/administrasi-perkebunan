@@ -378,6 +378,23 @@ function FarmApp() {
     }
   };
 
+  const joinCompanyFromSelector = async (code: string) => {
+    const inviteCode = code.trim();
+    if (!inviteCode) return;
+    try {
+      setLoading(true);
+      setErrorMessage('');
+      await api.post('/api/workspace/join', { code: inviteCode });
+      await loadData();
+      navigate('dashboard');
+      setCompanySelected(true);
+    } catch (err) {
+      setErrorMessage(apiError(err, 'Kode undangan perusahaan belum dapat digunakan.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
     await auth.signOut();
     setUser(null);
@@ -401,6 +418,7 @@ function FarmApp() {
       error={errorMessage}
       onSelect={selectCompany}
       onCreate={createCompanyFromSelector}
+      onJoin={joinCompanyFromSelector}
       onLogout={signOut}
     />
   );
@@ -427,7 +445,7 @@ function FarmApp() {
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Sprout size={24} /></div>
-            <div><strong>Administrasi</strong><span>Perkebunan · v4.12.0</span></div>
+            <div><strong>Administrasi</strong><span>Perkebunan · v4.12.1</span></div>
         </div>
         <button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Tutup menu">
           <X size={20} />
@@ -567,7 +585,7 @@ function Login({ onLogin, error }: { onLogin: (credentials: { email: string; pas
 }
 
 function CompanySelector({
-  user, data, loading, error, onSelect, onCreate, onLogout,
+  user, data, loading, error, onSelect, onCreate, onJoin, onLogout,
 }: {
   user: User;
   data: Bootstrap;
@@ -575,9 +593,9 @@ function CompanySelector({
   error: string;
   onSelect: (workspaceId: string) => Promise<void>;
   onCreate: (name: string) => Promise<void>;
+  onJoin: (code: string) => Promise<void>;
   onLogout: () => Promise<void>;
 }) {
-  const [companyName, setCompanyName] = useState('');
   return (
     <div className="company-select-page">
       <div className="company-select-shell">
@@ -606,6 +624,10 @@ function CompanySelector({
         <form className="company-create-card" onSubmit={event => { event.preventDefault(); const name = companyName.trim(); if (name.length >= 2) void onCreate(name); }}>
           <div><strong>Tambah perusahaan baru</strong><span>Buat ruang data perusahaan yang benar-benar terpisah.</span></div>
           <div className="company-create-row"><input placeholder="Contoh: PT Sawit Makmur" value={companyName} onChange={event => setCompanyName(event.target.value)} maxLength={120} /><button className="primary" disabled={loading || companyName.trim().length < 2}><Plus size={17} /> Buat Perusahaan</button></div>
+        </form>
+        <form className="company-create-card company-join-card" onSubmit={event => { event.preventDefault(); const code = joinCode.trim(); if (code) void onJoin(code); }}>
+          <div><strong>Punya kode undangan?</strong><span>Gabung ke perusahaan yang sudah dibuat oleh Owner.</span></div>
+          <div className="company-create-row"><input placeholder="Tempel kode undangan" value={joinCode} onChange={event => setJoinCode(event.target.value)} /><button className="secondary" disabled={loading || !joinCode.trim()}><UsersRound size={17} /> Gabung Perusahaan</button></div>
         </form>
         <div className="company-user-note">Login sebagai <strong>{user.name || user.email || 'Pengguna'}</strong></div>
       </div>
@@ -1971,44 +1993,6 @@ function AccessPanel({
   const [invite, setInvite] = useState({ email: '', role: 'VIEWER' as Exclude<Role, 'OWNER'>, assignedKebunId: '' });
   const [saving, setSaving] = useState(false);
 
-  const switchWorkspace = async (workspaceId: string) => {
-    if (workspaceId === data.workspace.id) return;
-    try {
-      setSaving(true);
-      await api.post('/api/workspace/switch', { workspaceId });
-      await reload();
-      flash('Perusahaan aktif berhasil diganti.');
-    } catch (err) { showError(apiError(err, 'Perusahaan gagal diganti.')); }
-    finally { setSaving(false); }
-  };
-
-  const createCompany = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const name = companyName.trim();
-    if (name.length < 2) return showError('Nama perusahaan minimal 2 karakter.');
-    try {
-      setSaving(true);
-      await api.post('/api/workspace/create', { name });
-      setCompanyName('');
-      await reload();
-      flash('Perusahaan baru dibuat dan langsung diaktifkan.');
-    } catch (err) { showError(apiError(err, 'Perusahaan baru belum dapat dibuat.')); }
-    finally { setSaving(false); }
-  };
-
-  const join = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!joinCode.trim()) return showError('Masukkan kode undangan perusahaan.');
-    try {
-      setSaving(true);
-      await api.post('/api/workspace/join', { code: joinCode.trim() });
-      setJoinCode('');
-      await reload();
-      flash('Berhasil bergabung dan berpindah ke perusahaan baru.');
-    } catch (err) { showError(apiError(err, 'Kode undangan belum dapat digunakan.')); }
-    finally { setSaving(false); }
-  };
-
   const createInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (invite.role === 'ADMIN_KEBUN' && !invite.assignedKebunId) return showError('Pilih kebun untuk Admin Kebun.');
@@ -2030,26 +2014,7 @@ function AccessPanel({
 
   return (
     <div className="stack">
-      <section className="access-grid">
-        <div className="panel">
-          <div className="panel-head"><div><h3>Perusahaan Saya</h3><p>Satu login dapat mengelola beberapa perusahaan. Data setiap perusahaan tetap terpisah.</p></div><span className="role-badge">{roleLabel(data.workspace.role)}</span></div>
-          <div className="workspace-current"><ShieldCheck size={24} /><div><strong>{data.workspace.name}</strong><span>Perusahaan aktif</span></div></div>
-          <div className="workspace-list">
-            {data.workspaces.map(item => (
-              <button key={item.id} className={item.id === data.workspace.id ? 'active' : ''} onClick={() => switchWorkspace(item.id)} disabled={saving}>
-                <div><strong>{item.name}</strong><span>{roleLabel(item.role)}</span></div><ChevronRight size={16} />
-              </button>
-            ))}
-          </div>
-          <form className="join-form" onSubmit={createCompany}>
-            <Field label="Tambah Perusahaan Baru"><input placeholder="Contoh: PT Sawit Makmur" value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={120} /></Field>
-            <button className="primary" disabled={saving || companyName.trim().length < 2}><Building2 size={16} /> Buat Perusahaan</button>
-          </form>
-          <form className="join-form" onSubmit={join}>
-            <Field label="Gabung Perusahaan dengan Kode Undangan"><input placeholder="Tempel kode undangan" value={joinCode} onChange={e => setJoinCode(e.target.value)} /></Field>
-            <button className="secondary" disabled={saving}>Gabung Perusahaan</button>
-          </form>
-        </div>
+      <section className="access-grid single-access">
         <div className="panel">
           <div className="panel-head"><div><h3>Akses Saya</h3><p>Hak akses mengikuti role di perusahaan aktif.</p></div></div>
           <div className="permission-card"><div className="avatar big">{(user.name || user.email || 'U').slice(0, 1).toUpperCase()}</div><div><strong>{user.name || user.email || 'Pengguna'}</strong><span>{user.email || ''}</span><b>{roleLabel(data.workspace.role)}</b></div></div>
@@ -2150,3 +2115,5 @@ function apiError(err: unknown, fallback: string) {
 }
 
 export default FarmApp;
+
+/* v4.12.1 company access cleanup */

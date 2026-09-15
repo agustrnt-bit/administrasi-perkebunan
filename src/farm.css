@@ -952,3 +952,8 @@ tbody tr:hover { background: #fafbf9; }
 .setup-checklist strong { font-size: 11px; }
 .setup-checklist small { font-size: 9px; color: #87938a; margin-top: 2px; }
 @media (max-width: 760px) { .company-form-grid, .company-form-grid.nested { grid-template-columns: 1fr; } .company-form-grid > .field:nth-of-type(7) { grid-column: auto; } .company-profile-hero { align-items: flex-start; } .company-setup-score { min-width: auto; padding-left: 14px; } }
+
+
+/* v4.12.1 company access cleanup */
+.access-grid.single-access { grid-template-columns: 1fr; }
+.company-join-card { margin-top: 12px; }
