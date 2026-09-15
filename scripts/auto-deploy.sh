@@ -53,7 +53,7 @@ for migration in "${migrations[@]}"; do
     "$MIGRATION_NODE_IMAGE" \
     node "$migration"; then
     echo "[$(date '+%F %T')] SOURCE MIGRATION GAGAL: $migration"
-    git restore --source=HEAD -- src/ 2>/dev/null || true
+    git restore --source=HEAD -- src/ backend/ 2>/dev/null || true
     mkdir -p "$(dirname "$MIGRATION_FAIL_MARKER")"
     touch "$MIGRATION_FAIL_MARKER"
     exit 1
@@ -61,7 +61,7 @@ for migration in "${migrations[@]}"; do
 done
 shopt -u nullglob
 
-if [ -n "$(git status --porcelain -- src/)" ]; then
+if [ -n "$(git status --porcelain -- src/ backend/)" ]; then
   MIGRATION_CHANGED=1
   echo "[$(date '+%F %T')] Perubahan source dari migration terdeteksi."
 fi
@@ -80,7 +80,7 @@ fi
 if ! docker compose build app; then
   echo "[$(date '+%F %T')] BUILD GAGAL. Source migration dikembalikan."
   if [ "$MIGRATION_CHANGED" -eq 1 ]; then
-    git restore --source=HEAD -- src/
+    git restore --source=HEAD -- src/ backend/
     mkdir -p "$(dirname "$MIGRATION_FAIL_MARKER")"
     touch "$MIGRATION_FAIL_MARKER"
   elif [ "$REMOTE_CHANGED" -eq 1 ]; then
@@ -105,7 +105,7 @@ if command -v curl >/dev/null 2>&1; then
   if [ "$HEALTHY" -ne 1 ]; then
     echo "[$(date '+%F %T')] HEALTH CHECK GAGAL. Mengembalikan versi sebelumnya."
     if [ "$MIGRATION_CHANGED" -eq 1 ]; then
-      git restore --source=HEAD -- src/
+      git restore --source=HEAD -- src/ backend/
       mkdir -p "$(dirname "$MIGRATION_FAIL_MARKER")"
       touch "$MIGRATION_FAIL_MARKER"
     else
@@ -119,7 +119,7 @@ fi
 
 # Setelah build dan health check lolos, source hasil migration menjadi source resmi GitHub.
 if [ "$MIGRATION_CHANGED" -eq 1 ]; then
-  git add src/
+  git add src/ backend/
   git commit -m "Apply validated source migration"
   git push origin main
 fi
