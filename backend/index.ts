@@ -854,7 +854,7 @@ async function setActiveWorkspace(userId: string, workspaceId: string) {
 
 async function ensureDefaultWorkspace(user: AuthLike) {
   const membershipKey = membershipsTable(user.userId);
-  const existing = await db.list<MembershipRecord>(membershipKey, { limit: 20 });
+  const existing = await db.list<MembershipRecord>(membershipKey, { limit: 100 });
   if (existing.items.length > 0) return existing.items;
   const workspaceId = user.userId;
   const workspaceName = 'Administrasi Perkebunan';
@@ -896,7 +896,7 @@ async function ensureDefaultWorkspace(user: AuthLike) {
 async function workspaceContext(user: AuthLike): Promise<WorkspaceContext> {
   let memberships = await ensureDefaultWorkspace(user);
   if (!memberships[0]?.id) {
-    memberships = (await db.list<MembershipRecord>(membershipsTable(user.userId), { limit: 20 })).items;
+    memberships = (await db.list<MembershipRecord>(membershipsTable(user.userId), { limit: 100 })).items;
   }
   const profiles = await db.list<UserProfile>(profileTable(user.userId), { limit: 1 });
   const requested = profiles.items[0]?.activeWorkspaceId;
@@ -3811,12 +3811,72 @@ export const handler = router({
       return json({ transactions, nextToken: page.nextToken || '' });
     },
   ],
+  'POST /api/workspace/create': [
+    requireAuth(),
+    async ctx => {
+      const body = objectBody(ctx.body);
+      const workspaceName = text(body.name).trim().slice(0, 120);
+      if (workspaceName.length < 2) return error('Nama perusahaan minimal 2 karakter.', 400);
+
+      const membershipKey = membershipsTable(ctx.user!.userId);
+      const memberships = (await db.list<MembershipRecord>(membershipKey, { limit: 100 })).items;
+      if (memberships.length >= 100) return error('Maksimal 100 perusahaan dapat diakses oleh satu akun.', 409);
+      if (memberships.some(item => item.workspaceName.trim().toLowerCase() === workspaceName.toLowerCase())) {
+        return error('Perusahaan dengan nama tersebut sudah ada pada akses Anda.', 409);
+      }
+
+      const workspaceId = 'ws-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      const stamp = now();
+      const membership: MembershipRecord = {
+        workspaceId,
+        workspaceName,
+        role: 'OWNER',
+        assignedKebunIds: [],
+        joinedAt: stamp,
+      };
+
+      const [membershipId] = await db.add(membershipKey, [membership]);
+      if (!membershipId) return error('Perusahaan baru gagal dibuat.', 500);
+
+      const [metaId] = await db.add(metaTable(workspaceId), [
+        { name: workspaceName, ownerUserId: ctx.user!.userId, createdAt: stamp },
+      ]);
+      if (!metaId) {
+        await db.delete(membershipKey, [membershipId]);
+        return error('Identitas perusahaan baru gagal dibuat.', 500);
+      }
+
+      const [memberId] = await db.add(membersTable(workspaceId), [{
+        userId: ctx.user!.userId,
+        email: ctx.user!.email || '',
+        name: ctx.user!.name || ctx.user!.email || 'Owner',
+        role: 'OWNER',
+        assignedKebunIds: [],
+        joinedAt: stamp,
+      }]);
+      if (!memberId) {
+        await db.delete(metaTable(workspaceId), [metaId]);
+        await db.delete(membershipKey, [membershipId]);
+        return error('Owner perusahaan baru gagal dibuat.', 500);
+      }
+
+      try {
+        await setActiveWorkspace(ctx.user!.userId, workspaceId);
+      } catch (err) {
+        return error(err instanceof Error ? err.message : 'Perusahaan sudah dibuat tetapi belum dapat diaktifkan.', 500);
+      }
+
+      return json({
+        workspace: { id: workspaceId, name: workspaceName, role: 'OWNER', assignedKebunIds: [] },
+      }, 201);
+    },
+  ],
   'POST /api/workspace/switch': [
     requireAuth(),
     async ctx => {
       const body = objectBody(ctx.body);
       const workspaceId = text(body.workspaceId);
-      const memberships = (await db.list<MembershipRecord>(membershipsTable(ctx.user!.userId), { limit: 20 })).items;
+      const memberships = (await db.list<MembershipRecord>(membershipsTable(ctx.user!.userId), { limit: 100 })).items;
       if (!memberships.some(item => item.workspaceId === workspaceId)) {
         return error('Anda tidak memiliki akses ke workspace tersebut.', 403);
       }
@@ -3868,7 +3928,7 @@ export const handler = router({
         return error('Undangan ini ditujukan untuk email yang berbeda.', 403);
       }
       const membershipKey = membershipsTable(ctx.user!.userId);
-      const memberships = (await db.list<MembershipRecord>(membershipKey, { limit: 20 })).items;
+      const memberships = (await db.list<MembershipRecord>(membershipKey, { limit: 100 })).items;
       if (!memberships.some(item => item.workspaceId === workspaceId)) {
         const stamp = now();
         const membership: MembershipRecord = {
