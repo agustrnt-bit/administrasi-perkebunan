@@ -55,7 +55,8 @@ type SupplierPayment = {
 };
 type InventoryGroup = { id: string; code: string; name: string; canPurchase: boolean; canStore: boolean; canSell: boolean; purchaseAccountId: string; inventoryAccountId: string; active: boolean };
 type InventoryUnit = { id: string; code: string; name: string; active: boolean };
-type InventoryItem = { id: string; code: string; name: string; groupId: string; unitId: string; currentQuantity: number; averageCost: number; active: boolean };
+type InventoryItemUnitConversion = { unitId: string; factor: number; defaultPurchase?: boolean; defaultUsage?: boolean };
+type InventoryItem = { id: string; code: string; name: string; groupId: string; unitId: string; unitConversions?: InventoryItemUnitConversion[]; currentQuantity: number; averageCost: number; active: boolean };
 type InventoryWarehouse = { id: string; code: string; name: string; kebunId: string; active: boolean; isDefault: boolean };
 type PurchaseInvoiceLine = {
   kind: 'SERVICE' | 'INVENTORY';
@@ -66,6 +67,10 @@ type PurchaseInvoiceLine = {
   description: string;
   quantity: number;
   unit: string;
+  unitId?: string;
+  conversionFactor?: number;
+  baseQuantity?: number;
+  baseUnit?: string;
   unitPrice: number;
   debitAccountId: string;
   discountType?: 'AMOUNT' | 'PERCENT';
@@ -147,6 +152,7 @@ function blankPurchaseLine(kebunId = '') {
     description: '',
     quantity: '1',
     unit: 'jasa',
+    unitId: '',
     unitPrice: '',
     debitAccountId: '',
     discountType: 'PERCENT' as 'AMOUNT' | 'PERCENT',
@@ -206,6 +212,22 @@ function lineDiscountAmount(quantity: string | number, unitPrice: string | numbe
   const gross = Math.round((Number(quantity) || 0) * (Number(unitPrice) || 0));
   const value = Math.max(0, Number(discountValue) || 0);
   return discountType === 'PERCENT' ? Math.min(gross, Math.round(gross * Math.min(100, value) / 100)) : Math.min(gross, value);
+}
+function itemUnitChoices(item: InventoryItem | undefined, units: InventoryUnit[]) {
+  if (!item) return [] as Array<{ unitId: string; label: string; factor: number; defaultPurchase: boolean; defaultUsage: boolean }>;
+  const unitMap = new Map(units.map(unit => [unit.id, unit]));
+  const base = unitMap.get(item.unitId);
+  const rows = [{ unitId: item.unitId, label: base?.code || base?.name || '-', factor: 1, defaultPurchase: false, defaultUsage: false }];
+  for (const conversion of item.unitConversions || []) {
+    const unit = unitMap.get(conversion.unitId);
+    if (!unit || unit.active === false || !(conversion.factor > 0)) continue;
+    rows.push({ unitId: conversion.unitId, label: unit.code || unit.name, factor: conversion.factor, defaultPurchase: conversion.defaultPurchase === true, defaultUsage: conversion.defaultUsage === true });
+  }
+  return rows;
+}
+function preferredPurchaseUnitId(item: InventoryItem | undefined, units: InventoryUnit[]) {
+  const rows = itemUnitChoices(item, units);
+  return rows.find(row => row.defaultPurchase)?.unitId || item?.unitId || '';
 }
 
 export default function PurchaseInvoices({ data, reload, flash, showError }: Props) {
@@ -364,10 +386,15 @@ export default function PurchaseInvoices({ data, reload, flash, showError }: Pro
   const selectInventoryItem = (index: number, itemId: string) => {
     const item = inventoryItems.find(row => row.id === itemId);
     const group = item ? inventoryGroups.find(row => row.id === item.groupId) : undefined;
-    const unit = item ? inventoryUnits.find(row => row.id === item.unitId) : undefined;
+    const unitId = preferredPurchaseUnitId(item, inventoryUnits);
+    const choice = itemUnitChoices(item, inventoryUnits).find(row => row.unitId === unitId);
     const debitAccountId = group ? (group.canStore ? group.inventoryAccountId : group.purchaseAccountId) : '';
-    setInvoiceLine(index, { itemId, description: item?.name || '', unit: unit?.code || unit?.name || '', debitAccountId, search: item ? `${item.code} · ${item.name}` : '' });
+    setInvoiceLine(index, { itemId, description: item?.name || '', unitId, unit: choice?.label || '', debitAccountId, search: item ? `${item.code} · ${item.name}` : '' });
     setActivePurchasePicker(null);
+  };
+  const selectInventoryUnit = (index: number, item: InventoryItem | undefined, unitId: string) => {
+    const choice = itemUnitChoices(item, inventoryUnits).find(row => row.unitId === unitId);
+    setInvoiceLine(index, { unitId, unit: choice?.label || '' });
   };
   const selectServiceAccount = (index: number, accountId: string) => {
     const account = serviceDebitAccounts.find(row => row.id === accountId);
@@ -394,6 +421,7 @@ export default function PurchaseInvoices({ data, reload, flash, showError }: Pro
       description: line.description.trim(),
       quantity: Number(line.quantity || 0),
       unit: line.unit.trim(),
+      unitId: line.kind === 'INVENTORY' ? line.unitId || '' : '',
       unitPrice: Number(line.unitPrice || 0),
       debitAccountId: line.debitAccountId,
       discountType: line.discountType,
@@ -485,6 +513,7 @@ export default function PurchaseInvoices({ data, reload, flash, showError }: Pro
           description: line.description,
           quantity: String(line.quantity),
           unit: line.unit,
+          unitId: line.kind === 'INVENTORY' ? (line.unitId || selectedItem?.unitId || '') : '',
           unitPrice: String(line.unitPrice),
           debitAccountId: line.debitAccountId,
           discountType: line.discountType || 'AMOUNT' as 'AMOUNT' | 'PERCENT',
@@ -884,7 +913,7 @@ export default function PurchaseInvoices({ data, reload, flash, showError }: Pro
                       <div className="purchase-line" key={index}>
                         <div className="purchase-line-grid">
                           <Field label="Jenis">
-                            <select value={line.kind} onChange={event => setInvoiceLine(index, { kind: event.target.value as 'SERVICE' | 'INVENTORY', itemId: '', description: '', unit: event.target.value === 'SERVICE' ? 'jasa' : '', debitAccountId: '', search: '' })}>
+                            <select value={line.kind} onChange={event => setInvoiceLine(index, { kind: event.target.value as 'SERVICE' | 'INVENTORY', itemId: '', description: '', unit: event.target.value === 'SERVICE' ? 'jasa' : '', unitId: '', debitAccountId: '', search: '' })}>
                               <option value="SERVICE">Jasa</option>
                               <option value="INVENTORY">Inventory</option>
                             </select>
@@ -896,7 +925,7 @@ export default function PurchaseInvoices({ data, reload, flash, showError }: Pro
                             </div>
                           </Field>
                           <Field label="Qty"><input inputMode="decimal" value={line.quantity} onChange={event => setInvoiceLine(index, { quantity: event.target.value.replace(',', '.').replace(/[^0-9.]/g, '') })} /></Field>
-                          <Field label="Satuan"><input value={line.unit} disabled={line.kind === 'INVENTORY'} onChange={event => setInvoiceLine(index, { unit: event.target.value })} placeholder="unit" /></Field>
+                          <Field label="Satuan">{line.kind === 'INVENTORY' && selectedItem ? <select value={line.unitId || selectedItem.unitId} onChange={event => selectInventoryUnit(index, selectedItem, event.target.value)}>{itemUnitChoices(selectedItem, inventoryUnits).map(choice => <option key={choice.unitId} value={choice.unitId}>{choice.label}{choice.factor !== 1 ? ' · 1 ' + choice.label + ' = ' + choice.factor + ' ' + (inventoryUnits.find(unit => unit.id === selectedItem.unitId)?.code || inventoryUnits.find(unit => unit.id === selectedItem.unitId)?.name || 'dasar') : ' · Satuan Dasar'}</option>)}</select> : <input value={line.unit} onChange={event => setInvoiceLine(index, { unit: event.target.value })} placeholder="unit" />}</Field>
                           <Field label="Harga Satuan"><input inputMode="numeric" value={formatMoneyInput(line.unitPrice)} onChange={event => setInvoiceLine(index, { unitPrice: event.target.value.replace(/[^0-9]/g, '') })} placeholder="0" /></Field>
                           <Field label="Diskon"><div className="purchase-inline-input"><select value={line.discountType} onChange={event => setInvoiceLine(index, { discountType: event.target.value as 'AMOUNT' | 'PERCENT', discountValue: '' })}><option value="PERCENT">%</option><option value="AMOUNT">Rp</option></select><input inputMode={line.discountType === 'PERCENT' ? 'decimal' : 'numeric'} value={line.discountType === 'AMOUNT' ? formatMoneyInput(line.discountValue) : line.discountValue} onChange={event => setInvoiceLine(index, { discountValue: line.discountType === 'PERCENT' ? event.target.value.replace(',', '.').replace(/[^0-9.]/g, '') : event.target.value.replace(/[^0-9]/g, '') })} placeholder="0" /></div></Field>
                           <Field label="Kebun / Cost Center"><select value={line.kebunId} onChange={event => setInvoiceLine(index, { kebunId: event.target.value })}><option value="">Pusat / Umum</option>{data.kebun.map(item => <option key={item.id} value={item.id}>{item.code} - {item.name}</option>)}</select></Field>
@@ -1298,3 +1327,6 @@ function Summary({ label, value, note }: { label: string; value: string; note: s
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
 }
+
+
+/* v4.13 multi-unit purchase */

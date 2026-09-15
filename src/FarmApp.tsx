@@ -445,7 +445,7 @@ function FarmApp() {
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Sprout size={24} /></div>
-            <div><strong>Administrasi</strong><span>Perkebunan · v4.12.2</span></div>
+            <div><strong>Administrasi</strong><span>Perkebunan · v4.13.0</span></div>
         </div>
         <button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Tutup menu">
           <X size={20} />
@@ -2122,3 +2122,5 @@ export default FarmApp;
 
 
 /* v4.12.2 fix company selector state */
+
+/* v4.13 multi-unit inventory */
