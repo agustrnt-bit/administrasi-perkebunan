@@ -27,13 +27,13 @@ replaceOnce(
 
 replaceOnce(
   `setSubledgers(payload.opening.subledgers?.length ? payload.opening.subledgers.map(line => ({ ...line, amount: line.amount || '', quantity: line.quantity || '', unitCost: line.unitCost || '' })) : [blankSub()]);`,
-  `setSubledgers(payload.opening.subledgers?.length ? payload.opening.subledgers.map(line => ({ ...line, amount: line.amount || '', quantity: line.quantity || '', unitCost: line.unitCost || '', inputQuantity: line.inputQuantity ?? line.quantity || '', inputUnitId: line.inputUnitId || '', inputUnitCost: line.inputUnitCost ?? line.unitCost || '' })) : [blankSub()]);`,
+  `setSubledgers(payload.opening.subledgers?.length ? payload.opening.subledgers.map(line => ({ ...line, amount: line.amount || '', quantity: line.quantity || '', unitCost: line.unitCost || '', inputQuantity: (line.inputQuantity ?? line.quantity) || '', inputUnitId: line.inputUnitId || '', inputUnitCost: (line.inputUnitCost ?? line.unitCost) || '' })) : [blankSub()]);`,
   'load opening input unit metadata',
 );
 
 replaceOnce(
   `const subAmount = (row: Subledger) => row.kind === 'INVENTORY' ? Math.round(Number(row.quantity || 0) * Number(row.unitCost || 0)) : Number(row.amount || 0);`,
-  `const subAmount = (row: Subledger) => row.kind === 'INVENTORY' ? Math.round(Number(row.inputQuantity ?? row.quantity || 0) * Number(row.inputUnitCost ?? row.unitCost || 0)) : Number(row.amount || 0);`,
+  `const subAmount = (row: Subledger) => row.kind === 'INVENTORY' ? Math.round(Number((row.inputQuantity ?? row.quantity) || 0) * Number((row.inputUnitCost ?? row.unitCost) || 0)) : Number(row.amount || 0);`,
   'opening inventory preview amount',
 );
 replaceOnce(
@@ -42,7 +42,6 @@ replaceOnce(
   'opening select item base unit',
 );
 
-// Add selected transaction-unit state inside each inventory row.
 replaceOnce(
   `const unit = unitMap.get(item?.unitId || ''); const selectedLabel = item ? \`${'${item.code} - ${item.name}'}\` : '';`,
   `const unit = unitMap.get(item?.unitId || ''); const unitChoices = openingItemUnitChoices(item, inventoryUnits); const inputUnitId = row.inputUnitId || item?.unitId || ''; const inputUnit = unitChoices.find(choice => choice.unitId === inputUnitId) || unitChoices[0]; const selectedLabel = item ? \`${'${item.code} - ${item.name}'}\` : '';`,
@@ -51,7 +50,7 @@ replaceOnce(
 
 replaceOnce(
   `<label><span>Qty</span><input disabled={opening?.status === 'POSTED'} inputMode="decimal" value={row.quantity} placeholder="0" onChange={e => setSub(index, { quantity: e.target.value.replace(',', '.').replace(/[^0-9.]/g, '') })} /></label><div className="opening-inventory-unit"><span>Satuan</span><strong>{unit?.code || unit?.name || '-'}</strong></div><label><span>Harga Rata-rata</span><input disabled={opening?.status === 'POSTED'} inputMode="numeric" value={formatMoneyInput(row.unitCost)} placeholder="0" onChange={e => setSub(index, { unitCost: e.target.value.replace(/[^0-9]/g, '') })} /></label>`,
-  `<label><span>Qty</span><input disabled={opening?.status === 'POSTED'} inputMode="decimal" value={row.inputQuantity ?? row.quantity} placeholder="0" onChange={e => setSub(index, { inputQuantity: e.target.value.replace(',', '.').replace(/[^0-9.]/g, '') })} /></label><label className="opening-inventory-unit"><span>Satuan</span><select disabled={opening?.status === 'POSTED' || !item} value={inputUnitId} onChange={e => setSub(index, { inputUnitId: e.target.value })}>{unitChoices.map(choice => <option key={choice.unitId} value={choice.unitId}>{choice.label}{choice.factor !== 1 ? ' · 1 ' + choice.label + ' = ' + choice.factor + ' ' + (unit?.code || unit?.name || 'dasar') : ' · Dasar'}</option>)}</select></label><label><span>Harga / Satuan</span><input disabled={opening?.status === 'POSTED'} inputMode="numeric" value={formatMoneyInput(row.inputUnitCost ?? row.unitCost)} placeholder="0" onChange={e => setSub(index, { inputUnitCost: e.target.value.replace(/[^0-9]/g, '') })} /><small>{inputUnit && inputUnit.factor !== 1 ? 'Setara ' + idr.format(Number(row.inputUnitCost ?? row.unitCost || 0) / inputUnit.factor) + ' / ' + (unit?.code || unit?.name || 'dasar') : ''}</small></label>`,
+  `<label><span>Qty</span><input disabled={opening?.status === 'POSTED'} inputMode="decimal" value={row.inputQuantity ?? row.quantity} placeholder="0" onChange={e => setSub(index, { inputQuantity: e.target.value.replace(',', '.').replace(/[^0-9.]/g, '') })} /></label><label className="opening-inventory-unit"><span>Satuan</span><select disabled={opening?.status === 'POSTED' || !item} value={inputUnitId} onChange={e => setSub(index, { inputUnitId: e.target.value })}>{unitChoices.map(choice => <option key={choice.unitId} value={choice.unitId}>{choice.label}{choice.factor !== 1 ? ' · 1 ' + choice.label + ' = ' + choice.factor + ' ' + (unit?.code || unit?.name || 'dasar') : ' · Dasar'}</option>)}</select></label><label><span>Harga / Satuan</span><input disabled={opening?.status === 'POSTED'} inputMode="numeric" value={formatMoneyInput(row.inputUnitCost ?? row.unitCost)} placeholder="0" onChange={e => setSub(index, { inputUnitCost: e.target.value.replace(/[^0-9]/g, '') })} /><small>{inputUnit && inputUnit.factor !== 1 ? 'Setara ' + idr.format(Number((row.inputUnitCost ?? row.unitCost) || 0) / inputUnit.factor) + ' / ' + (unit?.code || unit?.name || 'dasar') : ''}</small></label>`,
   'opening inventory qty unit price fields',
 );
 
