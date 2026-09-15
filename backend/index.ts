@@ -402,6 +402,10 @@ type PurchaseInvoiceLineRecord = {
   description: string;
   quantity: number;
   unit: string;
+  unitId?: string;
+  conversionFactor?: number;
+  baseQuantity?: number;
+  baseUnit?: string;
   unitPrice: number;
   debitAccountId: string;
   discountType?: PurchaseDiscountType;
@@ -464,11 +468,18 @@ type InventoryUnitRecord = {
   createdAt: string;
   updatedAt: string;
 };
+type InventoryItemUnitConversionRecord = {
+  unitId: string;
+  factor: number;
+  defaultPurchase?: boolean;
+  defaultUsage?: boolean;
+};
 type InventoryItemRecord = {
   code: string;
   name: string;
   groupId: string;
   unitId: string;
+  unitConversions?: InventoryItemUnitConversionRecord[];
   openingQuantity: number;
   openingAverageCost: number;
   currentQuantity: number;
@@ -482,9 +493,9 @@ type InventoryItemRecord = {
 };
 type InventoryWarehouseRecord = { code: string; name: string; kebunId: string; manager: string; active: boolean; isDefault: boolean; createdBy: string; updatedBy: string; createdAt: string; updatedAt: string };
 type InventoryWarehouseBalanceRecord = { warehouseId: string; itemId: string; quantity: number; stockValue: number; averageCost: number; updatedBy: string; updatedAt: string };
-type InventoryUsageLineRecord = { itemId: string; warehouseId?: string; kebunId: string; debitAccountId: string; inventoryAccountId: string; quantity: number; unit: string; unitCost: number; amount: number; memo: string };
+type InventoryUsageLineRecord = { itemId: string; warehouseId?: string; kebunId: string; debitAccountId: string; inventoryAccountId: string; quantity: number; unit: string; inputQuantity?: number; inputUnitId?: string; inputUnit?: string; conversionFactor?: number; unitCost: number; amount: number; memo: string };
 type InventoryUsageRecord = { usageNumber: string; date: string; warehouseId?: string; reference: string; description: string; lines: InventoryUsageLineRecord[]; totalAmount: number; createdBy: string; createdAt: string };
-type InventoryTransferLineRecord = { itemId: string; quantity: number; unit: string; unitCost: number; amount: number };
+type InventoryTransferLineRecord = { itemId: string; quantity: number; unit: string; inputQuantity?: number; inputUnitId?: string; inputUnit?: string; conversionFactor?: number; unitCost: number; amount: number };
 type InventoryTransferRecord = { transferNumber: string; date: string; sourceWarehouseId: string; destinationWarehouseId: string; reference: string; description: string; lines: InventoryTransferLineRecord[]; totalAmount: number; status: 'POSTED' | 'REVERSED'; reversedAt?: string; reversedBy?: string; createdBy: string; createdAt: string };
 type InventoryStocktakeStatus = 'COUNTING' | 'REVIEW' | 'POSTED' | 'REVERSED';
 type InventoryStocktakeLineRecord = { itemId: string; unit: string; systemQuantity: number; systemValue: number; physicalQuantity: number | null; varianceQuantity: number; unitCost: number; varianceValue: number; note: string };
@@ -536,6 +547,11 @@ type OpeningSubledgerRecord = {
   amount: number;
   quantity: number;
   unitCost: number;
+  inputQuantity?: number;
+  inputUnitId?: string;
+  inputUnit?: string;
+  conversionFactor?: number;
+  inputUnitCost?: number;
   debit: number;
   credit: number;
 };
@@ -1636,6 +1652,46 @@ async function loadInventoryMaster(workspaceId: string) {
   ]);
   return { groups: groups.items, units: units.items, items: items.items, warehouses: warehouseLayer.warehouses, balances: warehouseLayer.balances, defaultWarehouseId: warehouseLayer.defaultWarehouseId };
 }
+function normalizeInventoryItemUnitConversions(baseUnitId: string, raw: unknown, units: Array<InventoryUnitRecord & { id: string }>) {
+  const rows = Array.isArray(raw) ? raw.slice(0, 20) : [];
+  const unitMap = new Map(units.map(item => [item.id, item]));
+  const seen = new Set<string>();
+  const result: InventoryItemUnitConversionRecord[] = [];
+  let purchaseTaken = false;
+  let usageTaken = false;
+  for (const value of rows) {
+    const row = objectBody(value);
+    const unitId = text(row.unitId);
+    if (!unitId || unitId === baseUnitId || seen.has(unitId)) continue;
+    const unit = unitMap.get(unitId);
+    const factor = Number(row.factor);
+    if (!unit || unit.active === false) throw new Error('Satuan alternatif harus berasal dari Master Satuan yang aktif.');
+    if (!Number.isFinite(factor) || factor <= 0) throw new Error('Faktor konversi satuan harus lebih dari nol.');
+    const defaultPurchase = row.defaultPurchase === true && !purchaseTaken;
+    const defaultUsage = row.defaultUsage === true && !usageTaken;
+    if (defaultPurchase) purchaseTaken = true;
+    if (defaultUsage) usageTaken = true;
+    seen.add(unitId);
+    result.push({ unitId, factor: Number(factor.toFixed(6)), defaultPurchase, defaultUsage });
+  }
+  return result;
+}
+function inventoryItemUnitChoice(item: InventoryItemRecord & { id?: string }, units: Array<InventoryUnitRecord & { id: string }>, requestedUnitId = '', preferred: 'PURCHASE' | 'USAGE' | 'NONE' = 'NONE') {
+  const unitMap = new Map(units.map(unit => [unit.id, unit]));
+  const baseUnit = unitMap.get(item.unitId);
+  if (!baseUnit || baseUnit.active === false) throw new Error('Satuan dasar barang tidak ditemukan atau nonaktif.');
+  const conversions = item.unitConversions || [];
+  let unitId = requestedUnitId;
+  if (!unitId && preferred === 'PURCHASE') unitId = conversions.find(row => row.defaultPurchase)?.unitId || item.unitId;
+  if (!unitId && preferred === 'USAGE') unitId = conversions.find(row => row.defaultUsage)?.unitId || item.unitId;
+  if (!unitId) unitId = item.unitId;
+  if (unitId === item.unitId) return { unitId, factor: 1, label: baseUnit.code || baseUnit.name, baseLabel: baseUnit.code || baseUnit.name };
+  const conversion = conversions.find(row => row.unitId === unitId);
+  const unit = unitMap.get(unitId);
+  if (!conversion || !unit || unit.active === false || !Number.isFinite(conversion.factor) || conversion.factor <= 0) throw new Error('Satuan transaksi tidak valid untuk barang yang dipilih.');
+  return { unitId, factor: conversion.factor, label: unit.code || unit.name, baseLabel: baseUnit.code || baseUnit.name };
+}
+
 async function inventoryWarehouseLocked(workspaceId: string, warehouseId: string, excludeStocktakeId = '') {
   const rows = (await db.list<InventoryStocktakeRecord>(dataTable('inventory_stocktakes', workspaceId), { limit: 200 })).items;
   return rows.some(item => item.id !== excludeStocktakeId && item.warehouseId === warehouseId && (item.status === 'COUNTING' || item.status === 'REVIEW'));
@@ -1788,7 +1844,9 @@ function parsePurchaseLines(raw: unknown, accounts: Array<AccountingAccountRecor
       if (!validAccount) throw new Error('Mapping akun Inventory pada Kelompok Barang belum valid.');
       if (group.canStore && !warehouseId) throw new Error('Gudang penerimaan wajib dipilih untuk barang yang disimpan sebagai persediaan.');
       if (group.canStore && !master.warehouses.some(candidate => candidate.id === warehouseId && candidate.active !== false)) throw new Error('Gudang penerimaan tidak ditemukan atau sudah nonaktif.');
-      return { kind, itemId, tracksStock: group.canStore, kebunId, warehouseId: group.canStore ? warehouseId : '', description: item.name.slice(0, 240), quantity, unit: (unit.code || unit.name).slice(0, 40), unitPrice, debitAccountId, discountType, discountValue, discountAmount, lineTotal, netTotal };
+      const choice = inventoryItemUnitChoice(item, master.units, text(row.unitId), 'PURCHASE');
+      const baseQuantity = Number((quantity * choice.factor).toFixed(6));
+      return { kind, itemId, tracksStock: group.canStore, kebunId, warehouseId: group.canStore ? warehouseId : '', description: item.name.slice(0, 240), quantity, unit: choice.label.slice(0, 40), unitId: choice.unitId, conversionFactor: choice.factor, baseQuantity, baseUnit: choice.baseLabel.slice(0, 40), unitPrice, debitAccountId, discountType, discountValue, discountAmount, lineTotal, netTotal };
     }
     const description = text(row.description).slice(0, 240);
     const unit = text(row.unit).slice(0, 40);
@@ -1821,7 +1879,7 @@ function inventoryContributions(invoice: PurchaseInvoiceRecord | null) {
   invoice.lines.forEach((line, index) => {
     if (line.kind !== 'INVENTORY' || !line.itemId || !line.tracksStock) return;
     const current = result.get(line.itemId) || { quantity: 0, value: 0 };
-    current.quantity += line.quantity;
+    current.quantity += line.baseQuantity ?? line.quantity;
     current.value += netAmounts[index] || 0;
     result.set(line.itemId, current);
   });
@@ -1836,7 +1894,7 @@ function inventoryWarehouseContributions(invoice: PurchaseInvoiceRecord | null, 
     const warehouseId = line.warehouseId || invoice.warehouseId || defaultWarehouseId;
     const key = inventoryWarehousePairKey(warehouseId, line.itemId);
     const current = result.get(key) || { warehouseId, itemId: line.itemId, quantity: 0, value: 0 };
-    current.quantity += line.quantity;
+    current.quantity += line.baseQuantity ?? line.quantity;
     current.value += netAmounts[index] || 0;
     result.set(key, current);
   });
@@ -1888,7 +1946,7 @@ async function latestInventoryMovementDate(workspaceId: string, itemIds: string[
 }
 async function prepareInventoryUsage(workspaceId: string, membership: MembershipRecord, rawLines: unknown, date: string, actor: string, fallbackWarehouseId = '') {
   const rows = Array.isArray(rawLines) ? rawLines.slice(0, 100) : []; if (rows.length === 0) throw new Error('Minimal satu baris Pemakaian Barang wajib diisi.'); const [master, accountingAccounts] = await Promise.all([loadInventoryMaster(workspaceId), ensureAccountingAccounts(workspaceId, actor)]); const itemMap = new Map(master.items.map(item => [item.id, item])); const groupMap = new Map(master.groups.map(item => [item.id, item])); const unitMap = new Map(master.units.map(item => [item.id, item])); const accountMap = new Map(accountingAccounts.map(item => [item.id, item])); const warehouseDefault = fallbackWarehouseId || master.defaultWarehouseId;
-  const baseLines = rows.map(raw => { const row = objectBody(raw); const itemId = text(row.itemId); const debitAccountId = text(row.debitAccountId); const kebunId = text(row.kebunId); const warehouseId = text(row.warehouseId) || warehouseDefault; const quantity = Number(row.quantity); const item = itemMap.get(itemId); const group = item ? groupMap.get(item.groupId) : undefined; const unit = item ? unitMap.get(item.unitId) : undefined; const debitAccount = accountMap.get(debitAccountId); if (!item || item.active === false || !group || group.active === false || !group.canStore || !group.inventoryAccountId || !unit || unit.active === false) throw new Error('Barang yang dipakai harus aktif, disimpan sebagai persediaan, dan memiliki mapping akun Persediaan.'); if (!master.warehouses.some(candidate => candidate.id === warehouseId && candidate.active !== false)) throw new Error('Gudang sumber wajib dipilih dan harus aktif.'); if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Jumlah pemakaian ${item.name} harus lebih dari nol.`); if (!debitAccount || debitAccount.active === false || !isPostingAccount(debitAccount) || !['ASSET', 'EXPENSE'].includes(debitAccount.group) || debitAccount.systemKey.startsWith('CASH:') || debitAccount.systemKey.startsWith('AR_') || debitAccount.systemKey === 'VAT_INPUT') throw new Error(`Akun Pemakaian ${item.name} harus akun posting Level 4 kelompok Aset atau Beban.`); if (debitAccountId === group.inventoryAccountId) throw new Error(`Akun Pemakaian ${item.name} tidak boleh sama dengan akun Persediaannya.`); if (membership.role === 'ADMIN_KEBUN' && !kebunId) throw new Error('Admin Kebun wajib memilih Kebun/Cost Center pada setiap baris Pemakaian Barang.'); if (kebunId && !canAccessKebun(membership, kebunId)) throw new Error('Terdapat Kebun/Cost Center di luar akses Anda.'); return { itemId, warehouseId, kebunId, debitAccountId, inventoryAccountId: group.inventoryAccountId, quantity, unit: (unit.code || unit.name).slice(0, 40), memo: '' }; });
+  const baseLines = rows.map(raw => { const row = objectBody(raw); const itemId = text(row.itemId); const debitAccountId = text(row.debitAccountId); const kebunId = text(row.kebunId); const warehouseId = text(row.warehouseId) || warehouseDefault; const inputQuantity = Number(row.quantity); const item = itemMap.get(itemId); const group = item ? groupMap.get(item.groupId) : undefined; const unit = item ? unitMap.get(item.unitId) : undefined; const debitAccount = accountMap.get(debitAccountId); if (!item || item.active === false || !group || group.active === false || !group.canStore || !group.inventoryAccountId || !unit || unit.active === false) throw new Error('Barang yang dipakai harus aktif, disimpan sebagai persediaan, dan memiliki mapping akun Persediaan.'); if (!master.warehouses.some(candidate => candidate.id === warehouseId && candidate.active !== false)) throw new Error('Gudang sumber wajib dipilih dan harus aktif.'); if (!Number.isFinite(inputQuantity) || inputQuantity <= 0) throw new Error(`Jumlah pemakaian ${item.name} harus lebih dari nol.`); if (!debitAccount || debitAccount.active === false || !isPostingAccount(debitAccount) || !['ASSET', 'EXPENSE'].includes(debitAccount.group) || debitAccount.systemKey.startsWith('CASH:') || debitAccount.systemKey.startsWith('AR_') || debitAccount.systemKey === 'VAT_INPUT') throw new Error(`Akun Pemakaian ${item.name} harus akun posting Level 4 kelompok Aset atau Beban.`); if (debitAccountId === group.inventoryAccountId) throw new Error(`Akun Pemakaian ${item.name} tidak boleh sama dengan akun Persediaannya.`); if (membership.role === 'ADMIN_KEBUN' && !kebunId) throw new Error('Admin Kebun wajib memilih Kebun/Cost Center pada setiap baris Pemakaian Barang.'); if (kebunId && !canAccessKebun(membership, kebunId)) throw new Error('Terdapat Kebun/Cost Center di luar akses Anda.'); const choice = inventoryItemUnitChoice(item, master.units, text(row.unitId), 'USAGE'); const quantity = Number((inputQuantity * choice.factor).toFixed(6)); return { itemId, warehouseId, kebunId, debitAccountId, inventoryAccountId: group.inventoryAccountId, quantity, unit: (unit.code || unit.name).slice(0, 40), inputQuantity, inputUnitId: choice.unitId, inputUnit: choice.label.slice(0, 40), conversionFactor: choice.factor, memo: '' }; });
   const kebunIds = [...new Set(baseLines.map(line => line.kebunId).filter(Boolean))]; if (kebunIds.length > 0) { const kebunRows = await db.get<KebunRecord>(dataTable('kebun', workspaceId), kebunIds); if (kebunRows.some(item => !item)) throw new Error('Kebun/Cost Center pada Pemakaian Barang tidak ditemukan.'); } const usageWarehouseIds = [...new Set(baseLines.map(line => line.warehouseId))]; for (const warehouseId of usageWarehouseIds) if (await inventoryWarehouseLocked(workspaceId, warehouseId)) throw new Error('Gudang sedang dikunci oleh Stok Opname aktif. Selesaikan Stok Opname sebelum Pemakaian Barang dilanjutkan.'); const itemIds = [...new Set(baseLines.map(line => line.itemId))]; const latestDate = await latestInventoryMovementDate(workspaceId, itemIds); if (latestDate && date < latestDate) throw new Error(`Tanggal Pemakaian Barang tidak boleh sebelum transaksi persediaan terakhir (${latestDate}). Gunakan tanggal yang sama/lebih baru agar Moving Average tetap konsisten.`);
   const balanceMap = new Map(master.balances.map(item => [inventoryWarehousePairKey(item.warehouseId, item.itemId), item])); const pairKeys = [...new Set(baseLines.map(line => inventoryWarehousePairKey(line.warehouseId, line.itemId)))]; const finalLines: InventoryUsageLineRecord[] = new Array(baseLines.length); const balanceUpdates: Array<{ id: string; record: InventoryWarehouseBalanceRecord }> = []; const balanceOriginals: Array<{ id: string; record: InventoryWarehouseBalanceRecord }> = []; const issuedByItem = new Map<string, { quantity: number; value: number }>();
   for (const pairKey of pairKeys) { const indexes = baseLines.map((line, index) => inventoryWarehousePairKey(line.warehouseId, line.itemId) === pairKey ? index : -1).filter(index => index >= 0); const sample = baseLines[indexes[0]]; const masterItem = itemMap.get(sample.itemId); const balance = balanceMap.get(pairKey); const issueQuantity = indexes.reduce((sum, index) => sum + baseLines[index].quantity, 0); const currentQuantity = Number(balance?.quantity || 0); const currentValue = Number(balance?.stockValue || 0); if (!masterItem || !balance || currentQuantity <= 0 || issueQuantity - currentQuantity > 0.000001) throw new Error(`Stok ${masterItem?.name || 'barang'} di gudang yang dipilih tidak cukup. Tersedia ${currentQuantity}.`); const unitCost = currentQuantity > 0 ? currentValue / currentQuantity : 0; const issueValue = Math.abs(issueQuantity - currentQuantity) <= 0.000001 ? Math.max(0, Math.round(currentValue)) : Math.max(0, Math.round(issueQuantity * unitCost)); let allocated = 0; indexes.forEach((lineIndex, position) => { const base = baseLines[lineIndex]; const amount = position === indexes.length - 1 ? issueValue - allocated : Math.round(issueValue * base.quantity / issueQuantity); allocated += amount; finalLines[lineIndex] = { ...base, unitCost: Number(unitCost.toFixed(6)), amount: Math.max(0, amount) }; }); const nextQuantity = Math.max(0, currentQuantity - issueQuantity); const nextValue = Math.max(0, Math.round(currentValue - issueValue)); const { id, ...original } = balance; balanceOriginals.push({ id, record: original }); balanceUpdates.push({ id, record: { ...original, quantity: nextQuantity, stockValue: nextValue, averageCost: nextQuantity > 0 ? Number((nextValue / nextQuantity).toFixed(6)) : 0, updatedBy: actor, updatedAt: now() } }); const issued = issuedByItem.get(sample.itemId) || { quantity: 0, value: 0 }; issued.quantity += issueQuantity; issued.value += issueValue; issuedByItem.set(sample.itemId, issued); }
@@ -2328,10 +2386,10 @@ async function normalizeOpeningDraft(workspaceId: string, body: Record<string, u
     else if (kind === 'PKS') { if (!mills.items.some(item => item.id === entityId)) throw new Error('PKS saldo awal tidak ditemukan.'); accountId = mappedSystemId('AR_PKS'); debit = amount; }
     else if (kind === 'EMPLOYEE') { if (!workers.items.some(item => item.id === entityId)) throw new Error('Pekerja saldo awal tidak ditemukan.'); accountId = mappedSystemId('AR_EMPLOYEE'); debit = amount; }
     else if (kind === 'SUPPLIER') { if (!suppliers.items.some(item => item.id === entityId)) throw new Error('Supplier saldo awal tidak ditemukan.'); accountId = mappedSystemId('AP_SUPPLIER'); credit = amount; }
-    else { const item = master.items.find(candidate => candidate.id === entityId); const group = item ? master.groups.find(candidate => candidate.id === item.groupId) : undefined; if (!item || !group || !group.canStore || !group.inventoryAccountId) throw new Error('Barang saldo awal harus berasal dari kelompok yang Disimpan.'); quantity = Math.max(0, Number(row.quantity) || 0); unitCost = money(row.unitCost); if (quantity <= 0) throw new Error(`Qty saldo awal ${item.name} harus lebih dari nol.`); amount = Math.round(quantity * unitCost); accountId = group.inventoryAccountId; debit = amount; }
+    else { const item = master.items.find(candidate => candidate.id === entityId); const group = item ? master.groups.find(candidate => candidate.id === item.groupId) : undefined; if (!item || !group || !group.canStore || !group.inventoryAccountId) throw new Error('Barang saldo awal harus berasal dari kelompok yang Disimpan.'); const inputQuantity = Math.max(0, Number(row.inputQuantity ?? row.quantity) || 0); const choice = inventoryItemUnitChoice(item, master.units, text(row.inputUnitId || row.unitId), 'NONE'); const inputUnitCost = money(row.inputUnitCost ?? row.unitCost); quantity = Number((inputQuantity * choice.factor).toFixed(6)); unitCost = choice.factor > 0 ? Number((inputUnitCost / choice.factor).toFixed(6)) : 0; if (quantity <= 0) throw new Error(`Qty saldo awal ${item.name} harus lebih dari nol.`); amount = Math.round(inputQuantity * inputUnitCost); accountId = group.inventoryAccountId; debit = amount; row.inputQuantity = inputQuantity; row.inputUnitId = choice.unitId; row.inputUnit = choice.label; row.conversionFactor = choice.factor; row.inputUnitCost = inputUnitCost; }
     if (!accountId) throw new Error('Mapping akun subledger belum tersedia.');
     if (kind !== 'INVENTORY' && amount <= 0) throw new Error('Nominal detail subledger harus lebih dari nol.');
-    return [{ kind, accountId, entityId, description: text(row.description).slice(0, 200), reference: text(row.reference).slice(0, 120), amount, quantity, unitCost, debit, credit }];
+    return [{ kind, accountId, entityId, description: text(row.description).slice(0, 200), reference: text(row.reference).slice(0, 120), amount, quantity, unitCost, inputQuantity: kind === 'INVENTORY' ? Number(row.inputQuantity || quantity) : undefined, inputUnitId: kind === 'INVENTORY' ? text(row.inputUnitId) : undefined, inputUnit: kind === 'INVENTORY' ? text(row.inputUnit) : undefined, conversionFactor: kind === 'INVENTORY' ? Number(row.conversionFactor || 1) : undefined, inputUnitCost: kind === 'INVENTORY' ? money(row.inputUnitCost ?? unitCost) : undefined, debit, credit }];
   });
   const fixedAssets: OpeningFixedAssetRecord[] = fixedMaster.assets.filter(asset => asset.status === 'ACTIVE' && asset.acquisitionCost > 0 && asset.acquisitionDate <= settings.conversionDate).map(asset => {
     const group = fixedMaster.groups.find(item => item.id === asset.groupId);
@@ -3214,7 +3272,9 @@ export const handler = router({
       const stamp = now();
       const actor = ctx.user!.email || ctx.user!.userId;
       const stockValue = Math.round(openingQuantity * openingAverageCost);
-      const record: InventoryItemRecord = { code, name, groupId, unitId, openingQuantity: 0, openingAverageCost: 0, currentQuantity: 0, averageCost: 0, stockValue: 0, active: body.active !== false, createdBy: actor, updatedBy: actor, createdAt: stamp, updatedAt: stamp };
+      let unitConversions: InventoryItemUnitConversionRecord[];
+      try { unitConversions = normalizeInventoryItemUnitConversions(unitId, body.unitConversions, master.units); } catch (err) { return error(err instanceof Error ? err.message : 'Konversi satuan barang tidak valid.', 400); }
+      const record: InventoryItemRecord = { code, name, groupId, unitId, unitConversions, openingQuantity: 0, openingAverageCost: 0, currentQuantity: 0, averageCost: 0, stockValue: 0, active: body.active !== false, createdBy: actor, updatedBy: actor, createdAt: stamp, updatedAt: stamp };
       const [id] = await db.add(dataTable('inventory_items', wc.workspaceId), [record]);
       if (!id) return error('Master Barang gagal disimpan.', 500);
       return json({ id, ...record }, 201);
@@ -3237,7 +3297,10 @@ export const handler = router({
       if (!name || !groupId || !unitId) return error('Nama barang, kelompok, dan satuan wajib diisi.', 400);
       if (!master.groups.some(item => item.id === groupId) || !master.units.some(item => item.id === unitId)) return error('Kelompok atau satuan tidak ditemukan.', 404);
       if (master.items.some(item => item.id !== ctx.params.id && (item.code.toUpperCase() === code || item.name.toLowerCase() === name.toLowerCase()))) return error('Kode atau nama barang sudah digunakan.', 409);
-      const record: InventoryItemRecord = { ...existing, code, name, groupId, unitId, active: body.active !== false, updatedBy: ctx.user!.email || ctx.user!.userId, updatedAt: now() };
+      if (existing.unitId !== unitId && (Math.abs(Number(existing.currentQuantity || 0)) > 0.000001 || Math.abs(Number(existing.stockValue || 0)) > 1)) return error('Satuan dasar tidak dapat diubah setelah barang memiliki stok. Kosongkan/koreksi stok terlebih dahulu.', 409);
+      let unitConversions: InventoryItemUnitConversionRecord[];
+      try { unitConversions = normalizeInventoryItemUnitConversions(unitId, body.unitConversions, master.units); } catch (err) { return error(err instanceof Error ? err.message : 'Konversi satuan barang tidak valid.', 400); }
+      const record: InventoryItemRecord = { ...existing, code, name, groupId, unitId, unitConversions, active: body.active !== false, updatedBy: ctx.user!.email || ctx.user!.userId, updatedAt: now() };
       const [ok] = await db.update(table, [{ id: ctx.params.id, record }]);
       if (!ok) return error('Master Barang gagal diperbarui.', 500);
       return json({ id: ctx.params.id, ...record });
@@ -3610,9 +3673,9 @@ export const handler = router({
     requireOpenAccountingDate('date'),
     async ctx => {
       const wc = await workspaceContext(ctx.user!); if (!canTransact(wc.membership.role)) return error('Role Viewer hanya dapat melihat Mutasi Antar Gudang.', 403); const body = objectBody(ctx.body); const date = text(body.date); const sourceWarehouseId = text(body.sourceWarehouseId); const destinationWarehouseId = text(body.destinationWarehouseId); if (!validIsoDate(date) || !sourceWarehouseId || !destinationWarehouseId || sourceWarehouseId === destinationWarehouseId) return error('Tanggal, gudang asal, dan gudang tujuan yang berbeda wajib dipilih.', 400); const actor = ctx.user!.email || ctx.user!.userId; const master = await loadInventoryMaster(wc.workspaceId); const source = master.warehouses.find(item => item.id === sourceWarehouseId && item.active !== false); const destination = master.warehouses.find(item => item.id === destinationWarehouseId && item.active !== false); if (!source || !destination) return error('Gudang asal/tujuan tidak ditemukan atau nonaktif.', 404); if (await inventoryWarehouseLocked(wc.workspaceId, sourceWarehouseId) || await inventoryWarehouseLocked(wc.workspaceId, destinationWarehouseId)) return error('Gudang asal/tujuan sedang dikunci oleh Stok Opname aktif.', 409);
-      const rawLines = Array.isArray(body.lines) ? body.lines.slice(0, 100) : []; if (!rawLines.length) return error('Minimal satu barang wajib dimutasi.', 400); const requested = new Map<string, number>(); for (const raw of rawLines) { const row = objectBody(raw); const itemId = text(row.itemId); const quantity = Number(row.quantity); if (!itemId || !Number.isFinite(quantity) || quantity <= 0) return error('Barang dan jumlah mutasi wajib valid.', 400); requested.set(itemId, (requested.get(itemId) || 0) + quantity); }
-      const itemMap = new Map(master.items.map(item => [item.id, item])); const unitMap = new Map(master.units.map(item => [item.id, item])); const balanceMap = new Map(master.balances.map(item => [inventoryWarehousePairKey(item.warehouseId, item.itemId), item])); const updates: Array<{ id: string; record: InventoryWarehouseBalanceRecord }> = []; const originals: Array<{ id: string; record: InventoryWarehouseBalanceRecord }> = []; const additions: InventoryWarehouseBalanceRecord[] = []; const lines: InventoryTransferLineRecord[] = [];
-      for (const [itemId, quantity] of requested) { const item = itemMap.get(itemId); if (!item || item.active === false) return error('Barang mutasi tidak ditemukan/aktif.', 404); const sourceBalance = balanceMap.get(inventoryWarehousePairKey(sourceWarehouseId, itemId)); const sourceQty = Number(sourceBalance?.quantity || 0); const sourceValue = Number(sourceBalance?.stockValue || 0); if (!sourceBalance || quantity - sourceQty > 0.000001) return error(`Stok ${item.name} di gudang asal tidak cukup. Tersedia ${sourceQty}.`, 409); const amount = Math.abs(quantity - sourceQty) <= 0.000001 ? Math.round(sourceValue) : Math.round(quantity * (sourceQty > 0 ? sourceValue / sourceQty : 0)); const unitCost = quantity > 0 ? amount / quantity : 0; const unit = unitMap.get(item.unitId); lines.push({ itemId, quantity, unit: unit?.code || unit?.name || '', unitCost: Number(unitCost.toFixed(6)), amount }); const { id: sourceId, ...sourceBase } = sourceBalance; originals.push({ id: sourceId, record: sourceBase }); const nextSourceQty = Math.max(0, sourceQty - quantity); const nextSourceValue = Math.max(0, Math.round(sourceValue - amount)); updates.push({ id: sourceId, record: { ...sourceBase, quantity: nextSourceQty, stockValue: nextSourceValue, averageCost: nextSourceQty > 0 ? Number((nextSourceValue / nextSourceQty).toFixed(6)) : 0, updatedBy: actor, updatedAt: now() } }); const destinationKey = inventoryWarehousePairKey(destinationWarehouseId, itemId); const destinationBalance = balanceMap.get(destinationKey); const destQty = Number(destinationBalance?.quantity || 0); const destValue = Number(destinationBalance?.stockValue || 0); const nextDestQty = destQty + quantity; const nextDestValue = Math.round(destValue + amount); const destinationRecord: InventoryWarehouseBalanceRecord = { warehouseId: destinationWarehouseId, itemId, quantity: nextDestQty, stockValue: nextDestValue, averageCost: nextDestQty > 0 ? Number((nextDestValue / nextDestQty).toFixed(6)) : 0, updatedBy: actor, updatedAt: now() }; if (destinationBalance) { const { id, ...destBase } = destinationBalance; originals.push({ id, record: destBase }); updates.push({ id, record: destinationRecord }); } else additions.push(destinationRecord); }
+      const rawLines = Array.isArray(body.lines) ? body.lines.slice(0, 100) : []; if (!rawLines.length) return error('Minimal satu barang wajib dimutasi.', 400); const itemMap = new Map(master.items.map(item => [item.id, item])); const requested = new Map<string, { quantity: number; inputQuantity: number; inputUnitId: string; inputUnit: string; conversionFactor: number }>(); for (const raw of rawLines) { const row = objectBody(raw); const itemId = text(row.itemId); const inputQuantity = Number(row.quantity); const item = itemMap.get(itemId); if (!item || !Number.isFinite(inputQuantity) || inputQuantity <= 0) return error('Barang dan jumlah mutasi wajib valid.', 400); if (requested.has(itemId)) return error('Barang yang sama cukup satu baris pada Mutasi Gudang.', 400); const choice = inventoryItemUnitChoice(item, master.units, text(row.unitId), 'USAGE'); requested.set(itemId, { quantity: Number((inputQuantity * choice.factor).toFixed(6)), inputQuantity, inputUnitId: choice.unitId, inputUnit: choice.label.slice(0, 40), conversionFactor: choice.factor }); }
+      const unitMap = new Map(master.units.map(item => [item.id, item])); const balanceMap = new Map(master.balances.map(item => [inventoryWarehousePairKey(item.warehouseId, item.itemId), item])); const updates: Array<{ id: string; record: InventoryWarehouseBalanceRecord }> = []; const originals: Array<{ id: string; record: InventoryWarehouseBalanceRecord }> = []; const additions: InventoryWarehouseBalanceRecord[] = []; const lines: InventoryTransferLineRecord[] = [];
+      for (const [itemId, request] of requested) { const quantity = request.quantity; const item = itemMap.get(itemId); if (!item || item.active === false) return error('Barang mutasi tidak ditemukan/aktif.', 404); const sourceBalance = balanceMap.get(inventoryWarehousePairKey(sourceWarehouseId, itemId)); const sourceQty = Number(sourceBalance?.quantity || 0); const sourceValue = Number(sourceBalance?.stockValue || 0); if (!sourceBalance || quantity - sourceQty > 0.000001) return error(`Stok ${item.name} di gudang asal tidak cukup. Tersedia ${sourceQty}.`, 409); const amount = Math.abs(quantity - sourceQty) <= 0.000001 ? Math.round(sourceValue) : Math.round(quantity * (sourceQty > 0 ? sourceValue / sourceQty : 0)); const unitCost = quantity > 0 ? amount / quantity : 0; const unit = unitMap.get(item.unitId); lines.push({ itemId, quantity, unit: unit?.code || unit?.name || '', inputQuantity: request.inputQuantity, inputUnitId: request.inputUnitId, inputUnit: request.inputUnit, conversionFactor: request.conversionFactor, unitCost: Number(unitCost.toFixed(6)), amount }); const { id: sourceId, ...sourceBase } = sourceBalance; originals.push({ id: sourceId, record: sourceBase }); const nextSourceQty = Math.max(0, sourceQty - quantity); const nextSourceValue = Math.max(0, Math.round(sourceValue - amount)); updates.push({ id: sourceId, record: { ...sourceBase, quantity: nextSourceQty, stockValue: nextSourceValue, averageCost: nextSourceQty > 0 ? Number((nextSourceValue / nextSourceQty).toFixed(6)) : 0, updatedBy: actor, updatedAt: now() } }); const destinationKey = inventoryWarehousePairKey(destinationWarehouseId, itemId); const destinationBalance = balanceMap.get(destinationKey); const destQty = Number(destinationBalance?.quantity || 0); const destValue = Number(destinationBalance?.stockValue || 0); const nextDestQty = destQty + quantity; const nextDestValue = Math.round(destValue + amount); const destinationRecord: InventoryWarehouseBalanceRecord = { warehouseId: destinationWarehouseId, itemId, quantity: nextDestQty, stockValue: nextDestValue, averageCost: nextDestQty > 0 ? Number((nextDestValue / nextDestQty).toFixed(6)) : 0, updatedBy: actor, updatedAt: now() }; if (destinationBalance) { const { id, ...destBase } = destinationBalance; originals.push({ id, record: destBase }); updates.push({ id, record: destinationRecord }); } else additions.push(destinationRecord); }
       const balanceTable = dataTable('inventory_warehouse_balances', wc.workspaceId); const updateResults = updates.length ? await db.update(balanceTable, updates) : []; if (updates.length && !updateResults.every(Boolean)) { const rollback = originals.filter((_, index) => updateResults[index]); if (rollback.length) await db.update(balanceTable, rollback); return error('Mutasi gudang gagal memperbarui stok lengkap.', 500); } const additionIds = additions.length ? await db.add(balanceTable, additions) : []; if (additions.length && (additionIds.length !== additions.length || additionIds.some(id => !id))) { if (originals.length) await db.update(balanceTable, originals); const created = additionIds.filter(Boolean); if (created.length) await db.delete(balanceTable, created); return error('Mutasi gudang gagal membuat saldo tujuan.', 500); }
       const stamp = now(); const record: InventoryTransferRecord = { transferNumber: transactionNumber(date, 'MTG'), date, sourceWarehouseId, destinationWarehouseId, reference: text(body.reference).slice(0, 120), description: text(body.description).slice(0, 300) || 'Mutasi Antar Gudang', lines, totalAmount: lines.reduce((sum, line) => sum + line.amount, 0), status: 'POSTED', createdBy: actor, createdAt: stamp }; const [id] = await db.add(dataTable('inventory_transfers', wc.workspaceId), [record]); if (!id) { if (originals.length) await db.update(balanceTable, originals); if (additionIds.length) await db.delete(balanceTable, additionIds.filter(Boolean)); return error('Stok sudah dipindahkan tetapi dokumen mutasi gagal dibuat.', 500); } return json({ id, ...record }, 201);
     },
@@ -6653,3 +6716,6 @@ export const handler = router({
     },
   ],
 });
+
+
+/* v4.13 multi-unit backend */
