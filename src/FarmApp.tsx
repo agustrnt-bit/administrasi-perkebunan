@@ -1736,6 +1736,7 @@ function AccessPanel({
   flash: (text: string) => void;
   showError: (text: string) => void;
 }) {
+  const [companyName, setCompanyName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [invite, setInvite] = useState({ email: '', role: 'VIEWER' as Exclude<Role, 'OWNER'>, assignedKebunId: '' });
   const [saving, setSaving] = useState(false);
@@ -1746,20 +1747,34 @@ function AccessPanel({
       setSaving(true);
       await api.post('/api/workspace/switch', { workspaceId });
       await reload();
-      flash('Workspace berhasil diganti.');
-    } catch (err) { showError(apiError(err, 'Workspace gagal diganti.')); }
+      flash('Perusahaan aktif berhasil diganti.');
+    } catch (err) { showError(apiError(err, 'Perusahaan gagal diganti.')); }
+    finally { setSaving(false); }
+  };
+
+  const createCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = companyName.trim();
+    if (name.length < 2) return showError('Nama perusahaan minimal 2 karakter.');
+    try {
+      setSaving(true);
+      await api.post('/api/workspace/create', { name });
+      setCompanyName('');
+      await reload();
+      flash('Perusahaan baru dibuat dan langsung diaktifkan.');
+    } catch (err) { showError(apiError(err, 'Perusahaan baru belum dapat dibuat.')); }
     finally { setSaving(false); }
   };
 
   const join = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode.trim()) return showError('Masukkan kode undangan workspace.');
+    if (!joinCode.trim()) return showError('Masukkan kode undangan perusahaan.');
     try {
       setSaving(true);
       await api.post('/api/workspace/join', { code: joinCode.trim() });
       setJoinCode('');
       await reload();
-      flash('Berhasil bergabung dan berpindah ke workspace baru.');
+      flash('Berhasil bergabung dan berpindah ke perusahaan baru.');
     } catch (err) { showError(apiError(err, 'Kode undangan belum dapat digunakan.')); }
     finally { setSaving(false); }
   };
@@ -1787,8 +1802,8 @@ function AccessPanel({
     <div className="stack">
       <section className="access-grid">
         <div className="panel">
-          <div className="panel-head"><div><h3>Workspace Saya</h3><p>Data dipisahkan per perusahaan/workspace.</p></div><span className="role-badge">{roleLabel(data.workspace.role)}</span></div>
-          <div className="workspace-current"><ShieldCheck size={24} /><div><strong>{data.workspace.name}</strong><span>Workspace aktif</span></div></div>
+          <div className="panel-head"><div><h3>Perusahaan Saya</h3><p>Satu login dapat mengelola beberapa perusahaan. Data setiap perusahaan tetap terpisah.</p></div><span className="role-badge">{roleLabel(data.workspace.role)}</span></div>
+          <div className="workspace-current"><ShieldCheck size={24} /><div><strong>{data.workspace.name}</strong><span>Perusahaan aktif</span></div></div>
           <div className="workspace-list">
             {data.workspaces.map(item => (
               <button key={item.id} className={item.id === data.workspace.id ? 'active' : ''} onClick={() => switchWorkspace(item.id)} disabled={saving}>
@@ -1796,13 +1811,17 @@ function AccessPanel({
               </button>
             ))}
           </div>
+          <form className="join-form" onSubmit={createCompany}>
+            <Field label="Tambah Perusahaan Baru"><input placeholder="Contoh: PT Sawit Makmur" value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={120} /></Field>
+            <button className="primary" disabled={saving || companyName.trim().length < 2}><Building2 size={16} /> Buat Perusahaan</button>
+          </form>
           <form className="join-form" onSubmit={join}>
-            <Field label="Gabung Workspace dengan Kode Undangan"><input placeholder="Tempel kode undangan" value={joinCode} onChange={e => setJoinCode(e.target.value)} /></Field>
-            <button className="secondary" disabled={saving}>Gabung Workspace</button>
+            <Field label="Gabung Perusahaan dengan Kode Undangan"><input placeholder="Tempel kode undangan" value={joinCode} onChange={e => setJoinCode(e.target.value)} /></Field>
+            <button className="secondary" disabled={saving}>Gabung Perusahaan</button>
           </form>
         </div>
         <div className="panel">
-          <div className="panel-head"><div><h3>Akses Saya</h3><p>Hak akses mengikuti role di workspace aktif.</p></div></div>
+          <div className="panel-head"><div><h3>Akses Saya</h3><p>Hak akses mengikuti role di perusahaan aktif.</p></div></div>
           <div className="permission-card"><div className="avatar big">{(user.name || user.email || 'U').slice(0, 1).toUpperCase()}</div><div><strong>{user.name || user.email || 'Pengguna'}</strong><span>{user.email || ''}</span><b>{roleLabel(data.workspace.role)}</b></div></div>
           <div className="permission-notes">
             {data.workspace.role === 'OWNER' && <p>Owner: akses penuh, master data, transaksi, transfer, laporan, dan undangan pengguna.</p>}
@@ -1827,7 +1846,7 @@ function AccessPanel({
       {(data.workspace.role === 'OWNER' || data.workspace.role === 'ADMIN_PUSAT') && (
         <section className="access-grid">
           <div className="panel">
-            <div className="panel-head"><div><h3>Anggota Workspace</h3><p>{data.members.length} pengguna terdaftar.</p></div></div>
+            <div className="panel-head"><div><h3>Pengguna Perusahaan</h3><p>{data.members.length} pengguna terdaftar pada perusahaan aktif.</p></div></div>
             <div className="member-list">{data.members.map(member => (
               <div className="member-row" key={member.id}><div className="avatar">{(member.name || member.email || 'U').slice(0, 1).toUpperCase()}</div><div><strong>{member.name || member.email || 'Pengguna'}</strong><span>{member.email || '-'}</span></div><b>{roleLabel(member.role)}</b></div>
             ))}</div>
