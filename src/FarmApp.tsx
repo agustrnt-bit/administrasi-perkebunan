@@ -502,31 +502,287 @@ function Login({ onLogin, error }: { onLogin: (credentials: { email: string; pas
 }
 
 function Dashboard({ data, onNavigate }: { data: Bootstrap; onNavigate: (tab: Tab) => void }) {
+  const [month, setMonth] = useState(today().slice(0, 7));
+  const [kebunId, setKebunId] = useState('');
+  const [extraLoading, setExtraLoading] = useState(false);
+  const [extra, setExtra] = useState<{
+    purchaseInvoices: Array<{ id: string; date: string; kebunId: string; amount: number; lines?: Array<{ kebunId?: string; lineTotal?: number; netTotal?: number }> }>;
+    inventoryItems: Array<{ id: string; name: string; currentQuantity: number; stockValue: number; active: boolean }>;
+    inventoryWarehouses: Array<{ id: string; kebunId: string; active: boolean }>;
+    inventoryBalances: Array<{ warehouseId: string; itemId: string; quantity: number; stockValue: number; averageCost: number }>;
+    inventoryUsages: Array<{ id: string; date: string; totalAmount: number; lines?: Array<{ kebunId: string; amount: number }> }>;
+    fixedAssets: Array<{ id: string; kebunId: string; acquisitionCost: number; status: 'ACTIVE' | 'DISPOSED' | 'WRITTEN_OFF' }>;
+  }>({
+    purchaseInvoices: [],
+    inventoryItems: [],
+    inventoryWarehouses: [],
+    inventoryBalances: [],
+    inventoryUsages: [],
+    fixedAssets: [],
+  });
+
+  useEffect(() => {
+    let active = true;
+    const loadDashboardExtras = async () => {
+      try {
+        setExtraLoading(true);
+        const [purchaseResult, inventoryResult, usageResult, fixedAssetResult] = await Promise.allSettled([
+          api.get('/api/purchase-invoices'),
+          api.get('/api/inventory/master'),
+          api.get('/api/inventory-usages'),
+          api.get('/api/fixed-assets/master'),
+        ]);
+        if (!active) return;
+
+        const purchaseRes = purchaseResult.status === 'fulfilled' ? purchaseResult.value : null;
+        const inventoryRes = inventoryResult.status === 'fulfilled' ? inventoryResult.value : null;
+        const usageRes = usageResult.status === 'fulfilled' ? usageResult.value : null;
+        const fixedAssetRes = fixedAssetResult.status === 'fulfilled' ? fixedAssetResult.value : null;
+        const inventory = (inventoryRes?.data || {}) as {
+          items?: Array<{ id: string; name: string; currentQuantity: number; stockValue: number; active: boolean }>;
+          warehouses?: Array<{ id: string; kebunId: string; active: boolean }>;
+          balances?: Array<{ warehouseId: string; itemId: string; quantity: number; stockValue: number; averageCost: number }>;
+        };
+
+        setExtra({
+          purchaseInvoices: purchaseRes ? (purchaseRes.data as { invoices?: Array<{ id: string; date: string; kebunId: string; amount: number; lines?: Array<{ kebunId?: string; lineTotal?: number; netTotal?: number }> }> }).invoices || [] : [],
+          inventoryItems: inventory.items || [],
+          inventoryWarehouses: inventory.warehouses || [],
+          inventoryBalances: inventory.balances || [],
+          inventoryUsages: usageRes ? (usageRes.data as { usages?: Array<{ id: string; date: string; totalAmount: number; lines?: Array<{ kebunId: string; amount: number }> }> }).usages || [] : [],
+          fixedAssets: fixedAssetRes ? (fixedAssetRes.data as { assets?: Array<{ id: string; kebunId: string; acquisitionCost: number; status: 'ACTIVE' | 'DISPOSED' | 'WRITTEN_OFF' }> }).assets || [] : [],
+        });
+      } finally {
+        if (active) setExtraLoading(false);
+      }
+    };
+    void loadDashboardExtras();
+    return () => { active = false; };
+  }, [data.workspace.id]);
+
+  const monthLabel = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(`${month}-01T00:00:00`));
+  const kgFormat = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 });
+
+  const txAmountForKebun = (tx: Transaction, targetKebunId: string) => {
+    if (!targetKebunId) return tx.amount;
+    if (tx.kind === 'TRANSFER') return 0;
+    if (tx.allocations?.length) {
+      return tx.allocations.reduce((sum, line) => {
+        const lineKebunId = line.kebunId === undefined ? tx.kebunId : line.kebunId;
+        return lineKebunId === targetKebunId ? sum + Number(line.amount || 0) : sum;
+      }, 0);
+    }
+    return tx.kebunId === targetKebunId ? tx.amount : 0;
+  };
+
   const accountBalances = useMemo(
     () => data.accounts.map(account => ({ ...account, balance: balanceForAccount(account, data.transactions, data.accountingCutoffDate) })),
     [data]
   );
   const totalBalance = accountBalances.reduce((sum, item) => sum + item.balance, 0);
-  const month = today().slice(0, 7);
-  const monthTx = data.transactions.filter(tx => isAfterAccountingCutoff(tx, data.accountingCutoffDate) && tx.kind !== 'TRANSFER' && tx.date.startsWith(month));
-  const income = monthTx.filter(tx => tx.direction === 'IN').reduce((sum, tx) => sum + tx.amount, 0);
-  const expense = monthTx.filter(tx => tx.direction === 'OUT').reduce((sum, tx) => sum + tx.amount, 0);
+
+  const monthTx = data.transactions.filter(tx =>
+    isAfterAccountingCutoff(tx, data.accountingCutoffDate) &&
+    tx.kind !== 'TRANSFER' &&
+    tx.date.startsWith(month)
+  );
+  const income = monthTx.filter(tx => tx.direction === 'IN').reduce((sum, tx) => sum + txAmountForKebun(tx, kebunId), 0);
+  const expense = monthTx.filter(tx => tx.direction === 'OUT').reduce((sum, tx) => sum + txAmountForKebun(tx, kebunId), 0);
+
+  const paidByBill = new Map<string, number>();
+  data.supplierPayments.forEach(payment => {
+    payment.allocations.forEach(line => {
+      paidByBill.set(line.billId, (paidByBill.get(line.billId) || 0) + Number(line.amount || 0));
+    });
+  });
+  const relevantBills = data.supplierBills.filter(bill => !kebunId || bill.kebunId === kebunId);
+  const payable = relevantBills.reduce((sum, bill) => sum + Math.max(0, Number(bill.amount || 0) - (paidByBill.get(bill.id) || 0)), 0);
+  const overdueBills = relevantBills.filter(bill => bill.dueDate && bill.dueDate < today() && Number(bill.amount || 0) - (paidByBill.get(bill.id) || 0) > 0);
+
+  const tbsMonth = data.tbs.filter(row => row.date.startsWith(month) && (!kebunId || row.kebunId === kebunId));
+  const tbsKg = tbsMonth.reduce((sum, row) => sum + Number(row.factoryWeightKg || row.fieldWeightKg || 0), 0);
+  const tbsRevenue = tbsMonth.reduce((sum, row) => sum + Number(row.netRevenue || 0), 0);
+
+  const invoiceAmountForKebun = (invoice: (typeof extra.purchaseInvoices)[number], targetKebunId: string) => {
+    if (!targetKebunId) return Number(invoice.amount || 0);
+    if (invoice.lines?.length) {
+      return invoice.lines.reduce((sum, line) => {
+        const lineKebunId = line.kebunId || invoice.kebunId;
+        return lineKebunId === targetKebunId ? sum + Number(line.netTotal ?? line.lineTotal ?? 0) : sum;
+      }, 0);
+    }
+    return invoice.kebunId === targetKebunId ? Number(invoice.amount || 0) : 0;
+  };
+  const purchasesMonth = extra.purchaseInvoices
+    .filter(invoice => invoice.date.startsWith(month))
+    .reduce((sum, invoice) => sum + invoiceAmountForKebun(invoice, kebunId), 0);
+
+  const usageAmountForKebun = (usage: (typeof extra.inventoryUsages)[number], targetKebunId: string) => {
+    if (!targetKebunId) return Number(usage.totalAmount || 0);
+    return (usage.lines || []).reduce((sum, line) => line.kebunId === targetKebunId ? sum + Number(line.amount || 0) : sum, 0);
+  };
+  const inventoryUsageMonth = extra.inventoryUsages
+    .filter(usage => usage.date.startsWith(month))
+    .reduce((sum, usage) => sum + usageAmountForKebun(usage, kebunId), 0);
+
+  const activeWarehouseIds = new Set(
+    extra.inventoryWarehouses
+      .filter(warehouse => warehouse.active !== false && (!kebunId || warehouse.kebunId === kebunId))
+      .map(warehouse => warehouse.id)
+  );
+  const relevantBalances = extra.inventoryBalances.filter(balance => activeWarehouseIds.has(balance.warehouseId));
+  const inventoryValue = relevantBalances.reduce((sum, balance) => sum + Number(balance.stockValue || 0), 0);
+  const itemQty = new Map<string, number>();
+  relevantBalances.forEach(balance => itemQty.set(balance.itemId, (itemQty.get(balance.itemId) || 0) + Number(balance.quantity || 0)));
+  const zeroStockItems = extra.inventoryItems.filter(item => item.active !== false && (itemQty.get(item.id) || 0) <= 0);
+
+  const activeAssets = extra.fixedAssets.filter(asset => asset.status === 'ACTIVE' && (!kebunId || asset.kebunId === kebunId));
+  const fixedAssetValue = activeAssets.reduce((sum, asset) => sum + Number(asset.acquisitionCost || 0), 0);
+
+  const paidReceivableById = new Map<string, number>();
+  data.payrollRuns
+    .filter(run => run.status === 'PAID')
+    .forEach(run => run.lines
+      .filter(line => line.sourceType === 'EMPLOYEE_RECEIVABLE' && line.kind === 'DEDUCTION')
+      .forEach(line => paidReceivableById.set(line.sourceId, (paidReceivableById.get(line.sourceId) || 0) + Number(line.amount || 0))));
+  const relevantReceivables = data.employeeReceivables;
+  const employeeReceivableBalance = relevantReceivables.reduce(
+    (sum, item) => sum + Math.max(0, Number(item.totalAmount || 0) - (paidReceivableById.get(item.id) || 0)),
+    0
+  );
+
+  const payrollMonth = data.payrollRuns
+    .filter(run => (run.paymentDate?.startsWith(month) || run.periodEnd?.startsWith(month)) && (!kebunId || run.lines.some(line => line.kebunId === kebunId)))
+    .reduce((sum, run) => {
+      if (!kebunId) return sum + Number(run.netPay || 0);
+      const earnings = run.lines.filter(line => line.kebunId === kebunId && line.kind === 'EARNING').reduce((s, line) => s + Number(line.amount || 0), 0);
+      const deductions = run.lines.filter(line => line.kebunId === kebunId && line.kind === 'DEDUCTION').reduce((s, line) => s + Number(line.amount || 0), 0);
+      return sum + Math.max(0, earnings - deductions);
+    }, 0);
+
+  const missingCostCenter = monthTx.filter(tx => {
+    if (tx.allocations?.length) {
+      return tx.allocations.some(line => (line.kebunId === undefined ? tx.kebunId : line.kebunId) === '');
+    }
+    return !tx.kebunId;
+  });
+  const openPayroll = data.payrollRuns.filter(run => run.status === 'OPEN' && (!kebunId || run.lines.some(line => line.kebunId === kebunId)));
+
   const recent = [...data.transactions]
+    .filter(tx => tx.date.startsWith(month) && (!kebunId || txAmountForKebun(tx, kebunId) > 0))
     .sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`))
     .slice(0, 6);
+
+  const kebunRows = data.kebun
+    .filter(item => item.status === 'AKTIF' && (!kebunId || item.id === kebunId))
+    .map(item => ({
+      ...item,
+      tbsKg: data.tbs.filter(record => record.date.startsWith(month) && record.kebunId === item.id).reduce((sum, record) => sum + Number(record.factoryWeightKg || record.fieldWeightKg || 0), 0),
+      expense: monthTx.filter(tx => tx.direction === 'OUT').reduce((sum, tx) => sum + txAmountForKebun(tx, item.id), 0),
+      purchases: extra.purchaseInvoices.filter(invoice => invoice.date.startsWith(month)).reduce((sum, invoice) => sum + invoiceAmountForKebun(invoice, item.id), 0),
+      inventoryUsage: extra.inventoryUsages.filter(usage => usage.date.startsWith(month)).reduce((sum, usage) => sum + usageAmountForKebun(usage, item.id), 0),
+    }));
+
+  const alerts = [
+    { key: 'overdue', title: 'Invoice Jatuh Tempo', count: overdueBills.length, detail: overdueBills.length ? `${idr.format(overdueBills.reduce((sum, bill) => sum + Math.max(0, bill.amount - (paidByBill.get(bill.id) || 0)), 0))} belum dibayar` : 'Tidak ada tagihan jatuh tempo', tab: 'purchases' as Tab },
+    { key: 'stock', title: 'Stok Kosong', count: zeroStockItems.length, detail: zeroStockItems.length ? 'Barang aktif dengan stok 0 atau kurang' : 'Tidak ada stok kosong', tab: 'inventory' as Tab },
+    { key: 'costcenter', title: 'Tanpa Cost Center', count: missingCostCenter.length, detail: missingCostCenter.length ? `Transaksi ${monthLabel} perlu dilengkapi` : 'Semua transaksi bulan ini sudah terarah', tab: 'transactions' as Tab },
+    { key: 'payroll', title: 'Payroll Belum Dibayar', count: openPayroll.length, detail: openPayroll.length ? `${idr.format(openPayroll.reduce((sum, run) => sum + Number(run.netPay || 0), 0))} masih terbuka` : 'Tidak ada payroll terbuka', tab: 'payroll' as Tab },
+    { key: 'opening', title: 'Saldo Awal', count: data.accountingOpeningPosted ? 0 : 1, detail: data.accountingOpeningPosted ? `Sudah diposting${data.accountingCutoffDate ? ` per ${formatDate(data.accountingCutoffDate)}` : ''}` : 'Belum diposting ke akuntansi', tab: 'accounting' as Tab },
+  ];
+
   return (
-    <div className="stack">
-      <section className="metrics">
-        <Metric
-          icon={Wallet}
-          label="Total Saldo Kas & Bank"
-          value={data.workspace.restrictedBalances ? 'Akses terbatas' : idr.format(totalBalance)}
-          note={data.workspace.restrictedBalances ? 'Saldo penuh hanya untuk pusat/finance' : `${data.accounts.length} akun aktif`}
-        />
-        <Metric icon={ArrowUpCircle} label="Pemasukan Bulan Ini" value={idr.format(income)} note={`${monthTx.filter(tx => tx.direction === 'IN').length} transaksi`} />
-        <Metric icon={ArrowDownCircle} label="Pengeluaran Bulan Ini" value={idr.format(expense)} note={`${monthTx.filter(tx => tx.direction === 'OUT').length} transaksi`} />
-        <Metric icon={Sprout} label="Kebun Terdaftar" value={`${data.kebun.filter(item => item.status === 'AKTIF').length}`} note={`${data.kebun.length} kebun dalam akses`} />
+    <div className="stack dashboard-control">
+      <section className="panel dashboard-toolbar">
+        <div>
+          <span className="eyebrow dashboard-eyebrow">Panel Kontrol Kebun</span>
+          <h2>Ringkasan {kebunId ? findKebun(data, kebunId)?.name || 'Kebun' : 'Semua Kebun'}</h2>
+          <p>Keuangan, operasional, dan perhatian utama dalam satu tampilan.</p>
+        </div>
+        <div className="dashboard-filters">
+          <label>
+            <span>Periode</span>
+            <input type="month" value={month} onChange={event => setMonth(event.target.value || today().slice(0, 7))} />
+          </label>
+          <label>
+            <span>Kebun / Cost Center</span>
+            <select value={kebunId} onChange={event => setKebunId(event.target.value)}>
+              <option value="">Semua Kebun</option>
+              {data.kebun.filter(item => item.status === 'AKTIF').map(item => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}
+            </select>
+          </label>
+        </div>
       </section>
+
+      <div className="dashboard-section-head">
+        <div><strong>Keuangan</strong><span>{monthLabel}</span></div>
+        {kebunId && <small>Saldo Kas & Bank tetap global karena saldo melekat pada rekening, bukan Cost Center.</small>}
+      </div>
+      <section className="metrics">
+        <Metric icon={Wallet} label="Total Saldo Kas & Bank" value={data.workspace.restrictedBalances ? 'Akses terbatas' : idr.format(totalBalance)} note={data.workspace.restrictedBalances ? 'Saldo penuh hanya untuk pusat/finance' : `${data.accounts.length} akun aktif · global`} />
+        <Metric icon={ArrowUpCircle} label="Pemasukan" value={idr.format(income)} note={`${monthTx.filter(tx => tx.direction === 'IN' && txAmountForKebun(tx, kebunId) > 0).length} transaksi`} />
+        <Metric icon={ArrowDownCircle} label="Pengeluaran" value={idr.format(expense)} note={`${monthTx.filter(tx => tx.direction === 'OUT' && txAmountForKebun(tx, kebunId) > 0).length} transaksi`} />
+        <Metric icon={CircleDollarSign} label="Hutang Supplier" value={idr.format(payable)} note={`${relevantBills.filter(bill => bill.amount - (paidByBill.get(bill.id) || 0) > 0).length} tagihan terbuka`} />
+      </section>
+
+      <div className="dashboard-section-head">
+        <div><strong>Operasional</strong><span>Aktivitas bulan berjalan sesuai filter</span></div>
+        {extraLoading && <small>Memuat data pembelian, persediaan, dan aset…</small>}
+      </div>
+      <section className="metrics">
+        <Metric icon={Truck} label="Produksi TBS" value={`${kgFormat.format(tbsKg)} kg`} note={`${tbsMonth.length} transaksi · net ${idr.format(tbsRevenue)}`} />
+        <Metric icon={ShoppingCart} label="Pembelian" value={idr.format(purchasesMonth)} note={`${extra.purchaseInvoices.filter(invoice => invoice.date.startsWith(month) && invoiceAmountForKebun(invoice, kebunId) > 0).length} invoice`} />
+        <Metric icon={PackageMinus} label="Nilai Persediaan" value={idr.format(inventoryValue)} note={inventoryUsageMonth ? `${idr.format(inventoryUsageMonth)} dipakai bulan ini` : 'Belum ada pemakaian bulan ini'} />
+        <Metric icon={UsersRound} label="Payroll" value={idr.format(payrollMonth)} note={`${openPayroll.length} payroll masih terbuka`} />
+      </section>
+
+      <section className="grid-2 dashboard-middle">
+        <div className="panel">
+          <div className="panel-head"><div><h3>Perlu Perhatian</h3><p>Prioritas yang perlu ditindaklanjuti admin/owner.</p></div></div>
+          <div className="dashboard-alert-list">
+            {alerts.map(alert => (
+              <button key={alert.key} className={`dashboard-alert ${alert.count > 0 ? 'warning' : 'ok'}`} onClick={() => onNavigate(alert.tab)}>
+                <div className="dashboard-alert-count">{alert.count}</div>
+                <div><strong>{alert.title}</strong><span>{alert.detail}</span></div>
+                <ChevronRight size={17} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head"><div><h3>Posisi Lainnya</h3><p>Nilai yang perlu dipantau di luar arus kas.</p></div></div>
+          <div className="dashboard-position-grid">
+            <button onClick={() => onNavigate('employeeReceivables')}><span>Piutang Karyawan</span><strong>{idr.format(employeeReceivableBalance)}</strong><small>{relevantReceivables.length} pencatatan · global</small></button>
+            <button onClick={() => onNavigate('inventory')}><span>Pemakaian Barang</span><strong>{idr.format(inventoryUsageMonth)}</strong><small>{monthLabel}</small></button>
+            <button onClick={() => onNavigate('accounting')}><span>Aset Tetap</span><strong>{idr.format(fixedAssetValue)}</strong><small>{activeAssets.length} aset aktif · nilai perolehan</small></button>
+            <button onClick={() => onNavigate('tbs')}><span>Net Revenue TBS</span><strong>{idr.format(tbsRevenue)}</strong><small>{kgFormat.format(tbsKg)} kg</small></button>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head"><div><h3>Ringkasan per Kebun</h3><p>Perbandingan aktivitas {monthLabel} berdasarkan Cost Center.</p></div></div>
+        {kebunRows.length === 0 ? <Empty text="Belum ada kebun aktif." /> : (
+          <div className="table-wrap">
+            <table className="dashboard-kebun-table">
+              <thead><tr><th>Kebun</th><th className="right">Produksi TBS</th><th className="right">Pengeluaran</th><th className="right">Pembelian</th><th className="right">Pemakaian Barang</th></tr></thead>
+              <tbody>
+                {kebunRows.map(row => (
+                  <tr key={row.id}>
+                    <td><strong>{row.code} · {row.name}</strong><small>{row.location || 'Lokasi belum diisi'}</small></td>
+                    <td className="right money">{kgFormat.format(row.tbsKg)} kg</td>
+                    <td className="right money">{idr.format(row.expense)}</td>
+                    <td className="right money">{idr.format(row.purchases)}</td>
+                    <td className="right money">{idr.format(row.inventoryUsage)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       <section className="grid-2">
         <div className="panel">
           <div className="panel-head"><div><h3>Saldo Kas & Bank</h3><p>Saldo terkini berdasarkan seluruh mutasi.</p></div></div>
@@ -548,10 +804,10 @@ function Dashboard({ data, onNavigate }: { data: Bootstrap; onNavigate: (tab: Ta
         </div>
         <div className="panel">
           <div className="panel-head">
-            <div><h3>Transaksi Terbaru</h3><p>Aktivitas terakhir dari workspace.</p></div>
+            <div><h3>Transaksi Terbaru</h3><p>Sesuai periode dan kebun yang dipilih.</p></div>
             <button className="text-btn" onClick={() => onNavigate('transactions')}>Lihat semua</button>
           </div>
-          {recent.length === 0 ? <Empty text="Belum ada transaksi." /> : (
+          {recent.length === 0 ? <Empty text="Belum ada transaksi pada filter ini." /> : (
             <div className="recent-list">{recent.map(tx => <TransactionLine key={tx.id} tx={tx} data={data} />)}</div>
           )}
         </div>
