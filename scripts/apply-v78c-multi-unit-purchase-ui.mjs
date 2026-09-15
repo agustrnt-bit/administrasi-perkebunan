@@ -38,13 +38,6 @@ replaceOnce(
 );
 
 replaceOnce(
-  `selectServiceAccount(index, matches[0].id); } }} />`,
-  `selectServiceAccount(index, matches[0].id); } }} />`,
-  'no-op keyboard anchor',
-);
-
-// Ensure changing kind clears unitId as well.
-replaceOnce(
   `onChange={event => setInvoiceLine(index, { kind: event.target.value as 'SERVICE' | 'INVENTORY', itemId: '', description: '', unit: event.target.value === 'SERVICE' ? 'jasa' : '', debitAccountId: '', search: '' })}`,
   `onChange={event => setInvoiceLine(index, { kind: event.target.value as 'SERVICE' | 'INVENTORY', itemId: '', description: '', unit: event.target.value === 'SERVICE' ? 'jasa' : '', unitId: '', debitAccountId: '', search: '' })}`,
   'clear unitId on kind change',
@@ -63,15 +56,8 @@ replaceOnce(
 );
 
 const oldUnitField = `<Field label="Satuan"><input value={line.unit} disabled={line.kind === 'INVENTORY'} onChange={event => setInvoiceLine(index, { unit: event.target.value })} placeholder="unit" /></Field>`;
-const newUnitField = `<Field label="Satuan">{line.kind === 'INVENTORY' && selectedItem ? <select value={line.unitId || selectedItem.unitId} onChange={event => selectInventoryUnit(index, selectedItem, event.target.value)}>{itemUnitChoices(selectedItem, inventoryUnits).map(choice => <option key={choice.unitId} value={choice.unitId}>{choice.label}{choice.factor !== 1 ? \\` · 1 ${choice.label} = ${choice.factor} ${inventoryUnits.find(unit => unit.id === selectedItem.unitId)?.code || inventoryUnits.find(unit => unit.id === selectedItem.unitId)?.name || 'dasar'}\\` : ' · Satuan Dasar'}</option>)}</select> : <input value={line.unit} onChange={event => setInvoiceLine(index, { unit: event.target.value })} placeholder="unit" />}</Field>`;
+const newUnitField = `<Field label="Satuan">{line.kind === 'INVENTORY' && selectedItem ? <select value={line.unitId || selectedItem.unitId} onChange={event => selectInventoryUnit(index, selectedItem, event.target.value)}>{itemUnitChoices(selectedItem, inventoryUnits).map(choice => <option key={choice.unitId} value={choice.unitId}>{choice.label}{choice.factor !== 1 ? ' · 1 ' + choice.label + ' = ' + choice.factor + ' ' + (inventoryUnits.find(unit => unit.id === selectedItem.unitId)?.code || inventoryUnits.find(unit => unit.id === selectedItem.unitId)?.name || 'dasar') : ' · Satuan Dasar'}</option>)}</select> : <input value={line.unit} onChange={event => setInvoiceLine(index, { unit: event.target.value })} placeholder="unit" />}</Field>`;
 replaceOnce(oldUnitField, newUnitField, 'purchase unit selector');
-
-// Add a base-quantity hint to total card without changing invoice pricing semantics.
-replaceOnce(
-  `<div className="purchase-line-total"><span>Total</span><strong>{idr.format(lineTotal)}</strong><small>{discountAmount > 0 ? \`Diskon ${'${idr.format(discountAmount)}'}\` : ''}</small></div>`,
-  `<div className="purchase-line-total"><span>Total</span><strong>{idr.format(lineTotal)}</strong><small>{line.kind === 'INVENTORY' && selectedItem ? (() => { const choice = itemUnitChoices(selectedItem, inventoryUnits).find(row => row.unitId === (line.unitId || selectedItem.unitId)); const base = inventoryUnits.find(unit => unit.id === selectedItem.unitId); const converted = (Number(line.quantity) || 0) * (choice?.factor || 1); return choice && choice.factor !== 1 ? \\`= ${converted.toLocaleString('id-ID', { maximumFractionDigits: 4 })} ${base?.code || base?.name || ''}\\` : discountAmount > 0 ? \\`Diskon ${idr.format(discountAmount)}\\` : ''; })() : discountAmount > 0 ? \\`Diskon ${idr.format(discountAmount)}\\` : ''}</small></div>`,
-  'purchase base qty hint',
-);
 
 source += `\n\n/* v4.13 multi-unit purchase */\n`;
 fs.writeFileSync(path, source);
