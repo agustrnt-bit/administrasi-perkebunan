@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="/opt/kebun-app/administrasi-perkebunan-v70-vps/02-vps-selfhost"
 LOCK_FILE="/tmp/kebun-auto-deploy.lock"
 MIGRATION_FAIL_MARKER="$APP_DIR/data/source-migration.failed"
+MIGRATION_NODE_IMAGE="node:22-bookworm-slim"
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
@@ -33,28 +34,36 @@ if [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
   REMOTE_CHANGED=1
 fi
 
-# Source migration bersifat idempotent. Ini memungkinkan update besar diterapkan
-# tanpa menyimpan secret/runtime data dan tetap divalidasi oleh build + health check.
+# Source migration bersifat idempotent. VPS ini menjalankan Node di Docker,
+# sehingga migration dieksekusi memakai image Node dan source host di-mount.
+# Marker gagal akan dicoba ulang pada run berikutnya setelah script diperbaiki.
 MIGRATION_CHANGED=0
-if [ ! -f "$MIGRATION_FAIL_MARKER" ]; then
-  shopt -s nullglob
-  migrations=(scripts/apply-v*.mjs)
-  for migration in "${migrations[@]}"; do
-    if ! node "$migration"; then
-      echo "[$(date '+%F %T')] SOURCE MIGRATION GAGAL: $migration"
-      git restore --source=HEAD -- src/ 2>/dev/null || true
-      mkdir -p "$(dirname "$MIGRATION_FAIL_MARKER")"
-      touch "$MIGRATION_FAIL_MARKER"
-      exit 1
-    fi
-  done
-  shopt -u nullglob
-  if [ -n "$(git status --porcelain -- src/)" ]; then
-    MIGRATION_CHANGED=1
-    echo "[$(date '+%F %T')] Perubahan source dari migration terdeteksi."
+if [ -f "$MIGRATION_FAIL_MARKER" ]; then
+  echo "[$(date '+%F %T')] Mengulang SOURCE MIGRATION yang sebelumnya gagal."
+  rm -f "$MIGRATION_FAIL_MARKER"
+fi
+
+shopt -s nullglob
+migrations=(scripts/apply-v*.mjs)
+for migration in "${migrations[@]}"; do
+  if ! docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -v "$APP_DIR:/app" \
+    -w /app \
+    "$MIGRATION_NODE_IMAGE" \
+    node "$migration"; then
+    echo "[$(date '+%F %T')] SOURCE MIGRATION GAGAL: $migration"
+    git restore --source=HEAD -- src/ 2>/dev/null || true
+    mkdir -p "$(dirname "$MIGRATION_FAIL_MARKER")"
+    touch "$MIGRATION_FAIL_MARKER"
+    exit 1
   fi
-else
-  echo "[$(date '+%F %T')] SOURCE MIGRATION dilewati karena marker gagal masih ada: $MIGRATION_FAIL_MARKER"
+done
+shopt -u nullglob
+
+if [ -n "$(git status --porcelain -- src/)" ]; then
+  MIGRATION_CHANGED=1
+  echo "[$(date '+%F %T')] Perubahan source dari migration terdeteksi."
 fi
 
 if [ "$REMOTE_CHANGED" -eq 0 ] && [ "$MIGRATION_CHANGED" -eq 0 ]; then
@@ -66,8 +75,6 @@ if [ "$BACKUP_DONE" -eq 0 ] && [ -f scripts/backup.sh ]; then
   bash scripts/backup.sh
   BACKUP_DONE=1
 fi
-
-DEPLOY_BASE="$(git rev-parse HEAD)"
 
 # Build dulu; container lama tetap berjalan sampai image baru berhasil dibuat.
 if ! docker compose build app; then
@@ -115,8 +122,8 @@ if [ "$MIGRATION_CHANGED" -eq 1 ]; then
   git add src/
   git commit -m "Apply validated source migration"
   git push origin main
-  rm -f "$MIGRATION_FAIL_MARKER"
 fi
 
+rm -f "$MIGRATION_FAIL_MARKER"
 FINAL_HEAD="$(git rev-parse HEAD)"
 echo "[$(date '+%F %T')] DEPLOY BERHASIL: $FINAL_HEAD"
