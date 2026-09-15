@@ -128,6 +128,28 @@ type WorkspaceInvite = {
   assignedKebunIds: string[];
   status: 'OPEN' | 'USED';
 };
+type CompanyProfile = {
+  name: string;
+  shortName: string;
+  businessType: string;
+  npwp: string;
+  nib: string;
+  address: string;
+  village: string;
+  district: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  phone: string;
+  email: string;
+  website: string;
+  picName: string;
+  picPosition: string;
+  fiscalYearStartMonth: number;
+  currency: string;
+  reportName: string;
+  logoUrl: string;
+};
 type Bootstrap = {
   workspace: Workspace;
   workspaces: Workspace[];
@@ -262,6 +284,7 @@ function FarmApp() {
     return stored === 'payables' ? 'purchases' : stored;
   }); 
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [companySelected, setCompanySelected] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -325,10 +348,41 @@ function FarmApp() {
     storeChoice(mainTabStorageKey, nextTab);
   };
 
+  const selectCompany = async (workspaceId: string) => {
+    try {
+      setLoading(true);
+      setErrorMessage('');
+      if (workspaceId !== data.workspace.id) await api.post('/api/workspace/switch', { workspaceId });
+      await loadData();
+      navigate('dashboard');
+      setCompanySelected(true);
+    } catch (err) {
+      setErrorMessage(apiError(err, 'Perusahaan belum dapat dibuka.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createCompanyFromSelector = async (name: string) => {
+    try {
+      setLoading(true);
+      setErrorMessage('');
+      await api.post('/api/workspace/create', { name });
+      await loadData();
+      navigate('dashboard');
+      setCompanySelected(true);
+    } catch (err) {
+      setErrorMessage(apiError(err, 'Perusahaan baru belum dapat dibuat.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
     await auth.signOut();
     setUser(null);
     setData(emptyData);
+    setCompanySelected(false);
     navigate('dashboard');
   };
 
@@ -339,6 +393,17 @@ function FarmApp() {
 
   if (loading && !user) return <Splash />;
   if (!user) return <Login onLogin={signIn} error={errorMessage} />;
+  if (!companySelected) return (
+    <CompanySelector
+      user={user}
+      data={data}
+      loading={loading}
+      error={errorMessage}
+      onSelect={selectCompany}
+      onCreate={createCompanyFromSelector}
+      onLogout={signOut}
+    />
+  );
 
   const navItems: Array<{ id: Tab; label: string; icon: typeof LayoutDashboard }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -354,7 +419,7 @@ function FarmApp() {
     ...(canManageMaster(data.workspace.role)
       ? [{ id: 'master' as Tab, label: 'Master Data', icon: Building2 }]
       : []),
-    { id: 'access', label: 'Pengguna & Akses', icon: UsersRound },
+    { id: 'access', label: 'Perusahaan', icon: Building2 },
   ];
 
   return (
@@ -362,13 +427,13 @@ function FarmApp() {
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Sprout size={24} /></div>
-            <div><strong>Administrasi</strong><span>Perkebunan · v4.11.0</span></div>
+            <div><strong>Administrasi</strong><span>Perkebunan · v4.12.0</span></div>
         </div>
         <button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Tutup menu">
           <X size={20} />
         </button>
         <div className="workspace-mini">
-          <span>Workspace aktif</span>
+          <span>Perusahaan aktif</span>
           <strong>{data.workspace.name}</strong>
           <b>{roleLabel(data.workspace.role)}</b>
         </div>
@@ -402,7 +467,7 @@ function FarmApp() {
             <h1>{navItems.find(item => item.id === tab)?.label || 'Administrasi Perkebunan'}</h1>
             <p>{data.workspace.name} · {roleLabel(data.workspace.role)}</p>
           </div>
-          <button className="refresh-btn" onClick={loadData}><RefreshCw size={16} /> <span>Refresh</span></button>
+          <div className="topbar-actions"><button className="company-switch-btn" onClick={() => setCompanySelected(false)}><Building2 size={16} /> <span>Ganti Perusahaan</span></button><button className="refresh-btn" onClick={loadData}><RefreshCw size={16} /> <span>Refresh</span></button></div>
         </header>
         {message && <div className="toast success">{message}</div>}
         {errorMessage && (
@@ -442,7 +507,7 @@ function FarmApp() {
             <MasterData data={data} reload={loadData} flash={flash} showError={setErrorMessage} />
           )}
           {tab === 'access' && (
-            <AccessPanel
+            <CompanyPanel
               user={user}
               data={data}
               reload={loadData}
@@ -489,13 +554,60 @@ function Login({ onLogin, error }: { onLogin: (credentials: { email: string; pas
             <div><strong>Administrasi</strong><span>Perkebunan</span></div>
           </div>
           <h2>Selamat datang</h2>
-          <p>Masuk untuk membuka workspace perkebunan Anda.</p>
+          <p>Masuk, lalu pilih perusahaan yang akan dikerjakan.</p>
           {error && <div className="inline-error">{error}</div>}
           <label className="field"><span>Email</span><input type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
           <label className="field"><span>Password</span><input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
           <button className="primary wide" type="submit"><LogIn size={19} /> Masuk ke Aplikasi</button>
-          <small>Data tersimpan di database aplikasi dan akses diatur berdasarkan workspace serta role pengguna.</small>
+          <small>Setiap perusahaan memiliki data terpisah. Hak akses mengikuti perusahaan dan role pengguna.</small>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function CompanySelector({
+  user, data, loading, error, onSelect, onCreate, onLogout,
+}: {
+  user: User;
+  data: Bootstrap;
+  loading: boolean;
+  error: string;
+  onSelect: (workspaceId: string) => Promise<void>;
+  onCreate: (name: string) => Promise<void>;
+  onLogout: () => Promise<void>;
+}) {
+  const [companyName, setCompanyName] = useState('');
+  return (
+    <div className="company-select-page">
+      <div className="company-select-shell">
+        <div className="company-select-head">
+          <div className="brand">
+            <div className="brand-mark"><Sprout size={24} /></div>
+            <div><strong>Administrasi</strong><span>Perkebunan</span></div>
+          </div>
+          <button className="secondary" onClick={() => void onLogout()}><LogOut size={16} /> Keluar</button>
+        </div>
+        <div className="company-select-copy">
+          <span className="eyebrow dark">Pilih Perusahaan</span>
+          <h1>Perusahaan mana yang akan dikerjakan?</h1>
+          <p>Setelah perusahaan dipilih, seluruh master, transaksi, persediaan, akuntansi, dan laporan hanya memakai data perusahaan tersebut.</p>
+        </div>
+        {error && <div className="inline-error">{error}</div>}
+        <div className="company-choice-grid">
+          {data.workspaces.map(item => (
+            <button key={item.id} className="company-choice-card" disabled={loading} onClick={() => void onSelect(item.id)}>
+              <span className="company-choice-icon"><Building2 size={25} /></span>
+              <span className="company-choice-copy"><strong>{item.name}</strong><small>{roleLabel(item.role)}</small></span>
+              <ChevronRight size={18} />
+            </button>
+          ))}
+        </div>
+        <form className="company-create-card" onSubmit={event => { event.preventDefault(); const name = companyName.trim(); if (name.length >= 2) void onCreate(name); }}>
+          <div><strong>Tambah perusahaan baru</strong><span>Buat ruang data perusahaan yang benar-benar terpisah.</span></div>
+          <div className="company-create-row"><input placeholder="Contoh: PT Sawit Makmur" value={companyName} onChange={event => setCompanyName(event.target.value)} maxLength={120} /><button className="primary" disabled={loading || companyName.trim().length < 2}><Plus size={17} /> Buat Perusahaan</button></div>
+        </form>
+        <div className="company-user-note">Login sebagai <strong>{user.name || user.email || 'Pengguna'}</strong></div>
       </div>
     </div>
   );
@@ -1719,6 +1831,124 @@ function MasterData({ data, reload, flash, showError }: { data: Bootstrap; reloa
       {masterPage === 'inventoryWarehouses' && <InventoryMasters workspaceId={data.workspace.id} kebun={data.kebun} flash={flash} showError={showError} section="warehouses" />}
       {masterPage === 'fixedAssetGroups' && <FixedAssets workspaceId={data.workspace.id} kebun={data.kebun} openingPosted={data.accountingOpeningPosted} cutoffDate={data.accountingCutoffDate} flash={flash} showError={showError} section="groups" />}
       {masterPage === 'fixedAssets' && <FixedAssets workspaceId={data.workspace.id} kebun={data.kebun} openingPosted={data.accountingOpeningPosted} cutoffDate={data.accountingCutoffDate} flash={flash} showError={showError} section="assets" />}
+    </div>
+  );
+}
+
+function CompanyPanel({
+  user, data, reload, flash, showError,
+}: {
+  user: User;
+  data: Bootstrap;
+  reload: () => Promise<void>;
+  flash: (text: string) => void;
+  showError: (text: string) => void;
+}) {
+  const defaultProfile: CompanyProfile = {
+    name: data.workspace.name, shortName: '', businessType: '', npwp: '', nib: '', address: '', village: '', district: '', city: '', province: '', postalCode: '', phone: '', email: '', website: '', picName: '', picPosition: '', fiscalYearStartMonth: 1, currency: 'IDR', reportName: data.workspace.name, logoUrl: '',
+  };
+  const [profile, setProfile] = useState<CompanyProfile>(defaultProfile);
+  const [canEditProfile, setCanEditProfile] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [coaStatus, setCoaStatus] = useState({ accounts: 0, mappings: 0 });
+
+  const loadProfile = async () => {
+    try {
+      setProfileLoading(true);
+      const [profileResult, coaResult] = await Promise.allSettled([api.get('/api/workspace/profile'), api.get('/api/accounting/accounts')]);
+      if (profileResult.status === 'fulfilled') {
+        const payload = profileResult.value.data as { profile?: CompanyProfile; canEdit?: boolean };
+        if (payload.profile) setProfile({ ...defaultProfile, ...payload.profile });
+        setCanEditProfile(Boolean(payload.canEdit));
+      }
+      if (coaResult.status === 'fulfilled') {
+        const payload = coaResult.value.data as { accounts?: unknown[]; systemMappings?: Record<string, string> };
+        setCoaStatus({ accounts: payload.accounts?.length || 0, mappings: Object.values(payload.systemMappings || {}).filter(Boolean).length });
+      }
+    } catch (err) {
+      showError(apiError(err, 'Profil Perusahaan belum dapat dimuat.'));
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  useEffect(() => { void loadProfile(); }, [data.workspace.id]);
+
+  const saveProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canEditProfile) return;
+    if (profile.name.trim().length < 2) return showError('Nama perusahaan minimal 2 karakter.');
+    try {
+      setProfileSaving(true);
+      await api.put('/api/workspace/profile', profile);
+      await reload();
+      await loadProfile();
+      flash('Profil Perusahaan berhasil diperbarui.');
+    } catch (err) {
+      showError(apiError(err, 'Profil Perusahaan belum dapat disimpan.'));
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const profileReady = Boolean(profile.name.trim() && profile.businessType.trim() && profile.address.trim());
+  const setupItems = [
+    { label: 'Profil Perusahaan', ready: profileReady, detail: profileReady ? 'Identitas utama terisi' : 'Lengkapi bentuk usaha dan alamat' },
+    { label: 'Chart of Accounts', ready: coaStatus.accounts > 0, detail: coaStatus.accounts > 0 ? coaStatus.accounts + ' akun tersedia' : 'Belum tersedia' },
+    { label: 'Akun Penting', ready: coaStatus.mappings > 0, detail: coaStatus.mappings > 0 ? coaStatus.mappings + ' mapping terhubung' : 'Belum diatur' },
+    { label: 'Kebun / Cost Center', ready: data.kebun.length > 0, detail: data.kebun.length > 0 ? data.kebun.length + ' kebun tersedia' : 'Belum ada kebun' },
+    { label: 'Kas & Bank', ready: data.accounts.length > 0, detail: data.accounts.length > 0 ? data.accounts.length + ' rekening tersedia' : 'Belum ada rekening' },
+    { label: 'Saldo Awal', ready: Boolean(data.accountingOpeningPosted), detail: data.accountingOpeningPosted ? 'Sudah diposting' : 'Belum diposting' },
+  ];
+  const readyCount = setupItems.filter(item => item.ready).length;
+  const progress = Math.round((readyCount / setupItems.length) * 100);
+
+  return (
+    <div className="stack">
+      <section className="company-profile-hero">
+        <div><span className="eyebrow">Perusahaan Aktif</span><h2>{profile.name || data.workspace.name}</h2><p>{profile.address || 'Alamat perusahaan belum dilengkapi.'}</p></div>
+        <div className="company-setup-score"><strong>{progress}%</strong><span>Setup awal</span></div>
+      </section>
+
+      <section className="access-grid">
+        <form className="panel company-profile-form" onSubmit={saveProfile}>
+          <div className="panel-head"><div><h3>Profil Perusahaan</h3><p>Identitas ini menjadi sumber nama dan informasi perusahaan pada laporan.</p></div>{canEditProfile && <button className="primary small-btn" disabled={profileSaving || profileLoading}><Save size={15} /> {profileSaving ? 'Menyimpan...' : 'Simpan Profil'}</button>}</div>
+          <div className="company-form-grid">
+            <Field label="Nama Perusahaan"><input value={profile.name} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, name: e.target.value }))} /></Field>
+            <Field label="Nama Singkat / Brand"><input value={profile.shortName} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, shortName: e.target.value }))} /></Field>
+            <Field label="Bentuk Usaha"><select value={profile.businessType} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, businessType: e.target.value }))}><option value="">Pilih bentuk usaha</option><option>PT</option><option>CV</option><option>UD</option><option>Koperasi</option><option>Perorangan</option><option>Yayasan</option><option>Lainnya</option></select></Field>
+            <Field label="NPWP"><input value={profile.npwp} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, npwp: e.target.value }))} /></Field>
+            <Field label="NIB"><input value={profile.nib} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, nib: e.target.value }))} /></Field>
+            <Field label="Nama pada Laporan"><input value={profile.reportName} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, reportName: e.target.value }))} /></Field>
+            <Field label="Alamat Lengkap"><textarea rows={3} value={profile.address} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, address: e.target.value }))} /></Field>
+            <div className="company-form-grid nested">
+              <Field label="Kelurahan / Desa"><input value={profile.village} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, village: e.target.value }))} /></Field>
+              <Field label="Kecamatan"><input value={profile.district} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, district: e.target.value }))} /></Field>
+              <Field label="Kota / Kabupaten"><input value={profile.city} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, city: e.target.value }))} /></Field>
+              <Field label="Provinsi"><input value={profile.province} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, province: e.target.value }))} /></Field>
+              <Field label="Kode Pos"><input value={profile.postalCode} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, postalCode: e.target.value }))} /></Field>
+            </div>
+            <Field label="Telepon / WhatsApp"><input value={profile.phone} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, phone: e.target.value }))} /></Field>
+            <Field label="Email"><input type="email" value={profile.email} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, email: e.target.value }))} /></Field>
+            <Field label="Website"><input value={profile.website} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, website: e.target.value }))} /></Field>
+            <Field label="PIC / Penanggung Jawab"><input value={profile.picName} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, picName: e.target.value }))} /></Field>
+            <Field label="Jabatan PIC"><input value={profile.picPosition} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, picPosition: e.target.value }))} /></Field>
+            <Field label="Awal Tahun Buku"><select value={profile.fiscalYearStartMonth} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, fiscalYearStartMonth: Number(e.target.value) }))}>{['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'].map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></Field>
+            <Field label="Mata Uang"><select value={profile.currency} disabled={!canEditProfile} onChange={e => setProfile(v => ({ ...v, currency: e.target.value }))}><option value="IDR">IDR - Rupiah</option></select></Field>
+            <Field label="URL Logo (opsional)"><input value={profile.logoUrl} disabled={!canEditProfile} placeholder="https://..." onChange={e => setProfile(v => ({ ...v, logoUrl: e.target.value }))} /></Field>
+          </div>
+        </form>
+
+        <section className="panel">
+          <div className="panel-head"><div><h3>Status Setup Awal</h3><p>Indikator kesiapan perusahaan sebelum transaksi rutin.</p></div><span className="role-badge">{readyCount}/{setupItems.length}</span></div>
+          <div className="setup-progress"><span style={{ width: progress + '%' }} /></div>
+          <div className="setup-checklist">{setupItems.map(item => <div key={item.label} className={item.ready ? 'ready' : ''}><span className="setup-dot">{item.ready ? '✓' : '!'}</span><div><strong>{item.label}</strong><small>{item.detail}</small></div></div>)}</div>
+          <div className="notice">Status ini membantu screening awal. Kesiapan final tetap mengikuti validasi COA, Akun Penting, subledger, periode, dan Saldo Awal.</div>
+        </section>
+      </section>
+
+      <AccessPanel user={user} data={data} reload={reload} flash={flash} showError={showError} />
     </div>
   );
 }

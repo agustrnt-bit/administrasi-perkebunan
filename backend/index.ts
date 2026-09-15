@@ -588,6 +588,26 @@ type WorkspaceMeta = {
   name: string;
   ownerUserId: string;
   createdAt: string;
+  updatedAt?: string;
+  shortName?: string;
+  businessType?: string;
+  npwp?: string;
+  nib?: string;
+  address?: string;
+  village?: string;
+  district?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  picName?: string;
+  picPosition?: string;
+  fiscalYearStartMonth?: number;
+  currency?: string;
+  reportName?: string;
+  logoUrl?: string;
 };
 type UserProfile = { activeWorkspaceId: string; updatedAt: string };
 type AuthLike = { userId: string; email?: string; name?: string };
@@ -3809,6 +3829,99 @@ export const handler = router({
         ? page.items.map(tx => projectTransactionForMembership(tx, wc.membership)).filter((tx): tx is (typeof page.items)[number] => Boolean(tx))
         : page.items;
       return json({ transactions, nextToken: page.nextToken || '' });
+    },
+  ],
+  'GET /api/workspace/profile': [
+    requireAuth(),
+    async ctx => {
+      const wc = await workspaceContext(ctx.user!);
+      const rows = (await db.list<WorkspaceMeta>(metaTable(wc.workspaceId), { limit: 1 })).items;
+      const meta = rows[0];
+      return json({
+        profile: {
+          name: meta?.name || wc.membership.workspaceName,
+          shortName: meta?.shortName || '',
+          businessType: meta?.businessType || '',
+          npwp: meta?.npwp || '',
+          nib: meta?.nib || '',
+          address: meta?.address || '',
+          village: meta?.village || '',
+          district: meta?.district || '',
+          city: meta?.city || '',
+          province: meta?.province || '',
+          postalCode: meta?.postalCode || '',
+          phone: meta?.phone || '',
+          email: meta?.email || '',
+          website: meta?.website || '',
+          picName: meta?.picName || '',
+          picPosition: meta?.picPosition || '',
+          fiscalYearStartMonth: Number(meta?.fiscalYearStartMonth || 1),
+          currency: meta?.currency || 'IDR',
+          reportName: meta?.reportName || meta?.name || wc.membership.workspaceName,
+          logoUrl: meta?.logoUrl || '',
+        },
+        canEdit: canManageMaster(wc.membership.role),
+      });
+    },
+  ],
+  'PUT /api/workspace/profile': [
+    requireAuth(),
+    async ctx => {
+      const wc = await workspaceContext(ctx.user!);
+      if (!canManageMaster(wc.membership.role)) return error('Hanya Owner/Admin Pusat yang dapat mengubah Profil Perusahaan.', 403);
+      const body = objectBody(ctx.body);
+      const name = text(body.name).trim().slice(0, 120);
+      if (name.length < 2) return error('Nama perusahaan minimal 2 karakter.', 400);
+      const month = Math.max(1, Math.min(12, Math.floor(decimal(body.fiscalYearStartMonth) || 1)));
+      const table = metaTable(wc.workspaceId);
+      const rows = (await db.list<WorkspaceMeta>(table, { limit: 1 })).items;
+      const existing = rows[0];
+      const stamp = now();
+      const profile: WorkspaceMeta = {
+        name,
+        ownerUserId: existing?.ownerUserId || ctx.user!.userId,
+        createdAt: existing?.createdAt || stamp,
+        updatedAt: stamp,
+        shortName: text(body.shortName).slice(0, 80),
+        businessType: text(body.businessType).slice(0, 40),
+        npwp: text(body.npwp).slice(0, 40),
+        nib: text(body.nib).slice(0, 60),
+        address: text(body.address).slice(0, 500),
+        village: text(body.village).slice(0, 100),
+        district: text(body.district).slice(0, 100),
+        city: text(body.city).slice(0, 100),
+        province: text(body.province).slice(0, 100),
+        postalCode: text(body.postalCode).slice(0, 12),
+        phone: text(body.phone).slice(0, 40),
+        email: text(body.email).slice(0, 160),
+        website: text(body.website).slice(0, 200),
+        picName: text(body.picName).slice(0, 120),
+        picPosition: text(body.picPosition).slice(0, 120),
+        fiscalYearStartMonth: month,
+        currency: text(body.currency).slice(0, 8) || 'IDR',
+        reportName: text(body.reportName).slice(0, 160) || name,
+        logoUrl: text(body.logoUrl).slice(0, 500),
+      };
+
+      if (existing?.id) {
+        const [ok] = await db.update(table, [{ id: existing.id, record: profile }]);
+        if (!ok) return error('Profil Perusahaan gagal diperbarui.', 500);
+      } else {
+        const [id] = await db.add(table, [profile]);
+        if (!id) return error('Profil Perusahaan gagal disimpan.', 500);
+      }
+
+      const members = (await db.list<MemberRecord>(membersTable(wc.workspaceId), { limit: 100 })).items;
+      for (const member of members) {
+        const membershipTable = membershipsTable(member.userId);
+        const memberships = (await db.list<MembershipRecord>(membershipTable, { limit: 100 })).items;
+        const target = memberships.find(item => item.workspaceId === wc.workspaceId);
+        if (!target?.id || target.workspaceName === name) continue;
+        const { id, ...record } = target;
+        await db.update(membershipTable, [{ id, record: { ...record, workspaceName: name } }]);
+      }
+
+      return json({ profile });
     },
   ],
   'POST /api/workspace/create': [
