@@ -820,3 +820,61 @@ tbody tr:hover { background: #fafbf9; }
   .dashboard-toolbar { padding: 16px; }
   .dashboard-toolbar h2 { font-size: 18px; }
 }
+
+
+/* v73 COA hierarchy */
+.coa-tree-table { border-collapse: separate; border-spacing: 0; }
+.coa-tree-table thead th { position: sticky; top: 0; z-index: 1; background: #fff; }
+.coa-tree-table .coa-row td { transition: background .15s ease; vertical-align: middle; }
+.coa-tree-table .coa-row:hover td { background: #f8faf7; }
+.coa-tree-table .coa-row-level-1 td { background: #edf4e9; border-top: 2px solid #d6e3d1; border-bottom-color: #dfe8dc; }
+.coa-tree-table .coa-row-level-1 .coa-name strong { font-size: 13px; color: #173d2c; }
+.coa-tree-table .coa-row-level-1 .coa-name span { font-weight: 800; color: #244c38; text-transform: uppercase; letter-spacing: .025em; }
+.coa-tree-table .coa-row-level-2 td { background: #fafcf9; }
+.coa-tree-table .coa-name { position: relative; min-width: 220px; }
+.coa-tree-table .coa-indent-2 { padding-left: 26px; }
+.coa-tree-table .coa-indent-3 { padding-left: 52px; }
+.coa-tree-table .coa-indent-4 { padding-left: 78px; }
+.coa-tree-table .coa-indent-2::before,
+.coa-tree-table .coa-indent-3::before,
+.coa-tree-table .coa-indent-4::before { content: '↳'; position: absolute; color: #8aa093; font-weight: 800; }
+.coa-tree-table .coa-indent-2::before { left: 7px; }
+.coa-tree-table .coa-indent-3::before { left: 32px; }
+.coa-tree-table .coa-indent-4::before { left: 58px; }
+.coa-tree-table .coa-row-level-2 .coa-name strong,
+.coa-tree-table .coa-row-level-2 .coa-name span { font-weight: 750; }
+.coa-tree-table .coa-row-level-3 .coa-name strong { color: #405449; }
+.coa-tree-table .coa-row-level-4 .coa-name strong { color: #52665a; }
+.coa-tree-table .coa-row-level-4 .coa-name span { color: #53665b; }
+.coa-tree-table .level-badge.l1 { background: #dfead9; color: #173d2c; }
+.coa-tree-table .level-badge.l2 { background: #e9f0e6; color: #31523f; }
+.coa-tree-table .level-badge.l3 { background: #eef2ec; color: #55675c; }
+.coa-tree-table .level-badge.l4 { background: #f3f5f2; color: #6d7b72; }
+@media (max-width: 900px) {
+  .coa-tree-table .coa-indent-2 { padding-left: 18px; }
+  .coa-tree-table .coa-indent-3 { padding-left: 32px; }
+  .coa-tree-table .coa-indent-4 { padding-left: 46px; }
+  .coa-tree-table .coa-indent-2::before { left: 3px; }
+  .coa-tree-table .coa-indent-3::before { left: 18px; }
+  .coa-tree-table .coa-indent-4::before { left: 32px; }
+}
+
+
+/* v74 COA readable font */
+.coa-tree-table th { font-size: 11px; padding: 12px 10px; }
+.coa-tree-table td { font-size: 12px; padding: 12px 10px; line-height: 1.45; }
+.coa-tree-table .coa-name strong { font-size: 12.5px; line-height: 1.35; }
+.coa-tree-table .coa-name span { font-size: 12px; line-height: 1.4; }
+.coa-tree-table .coa-name small { font-size: 10.5px; line-height: 1.35; }
+.coa-tree-table .level-badge { min-width: 34px; padding: 5px 7px; font-size: 11px; }
+.coa-tree-table .coa-row-level-1 .coa-name strong { font-size: 14px; }
+.coa-tree-table .coa-row-level-1 .coa-name span { font-size: 13px; }
+.coa-tree-table .coa-row-level-2 .coa-name strong { font-size: 13px; }
+.coa-tree-table .coa-row-level-2 .coa-name span { font-size: 12.5px; }
+.coa-list-search input { font-size: 12px; }
+@media (max-width: 900px) {
+  .coa-tree-table th { font-size: 10px; }
+  .coa-tree-table td { font-size: 11px; }
+  .coa-tree-table .coa-name strong { font-size: 11.5px; }
+  .coa-tree-table .coa-name span { font-size: 11px; }
+}
