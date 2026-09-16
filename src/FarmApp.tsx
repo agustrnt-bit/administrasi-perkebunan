@@ -1593,6 +1593,7 @@ function CashBankLedger({ data }: { data: Bootstrap }) {
 }
 
 function Reports({ data }: { data: Bootstrap }) {
+  // v89-report-grouping
   const reportPageStorageKey = 'perkebunan.navigation.reports.page';
   const reportPages = ['hub', 'financial', 'accounting', 'tbs', 'purchases', 'receivables', 'inventory', 'assets'] as const;
   type ReportPage = (typeof reportPages)[number];
@@ -1730,8 +1731,8 @@ function Reports({ data }: { data: Bootstrap }) {
   const receivableOutstanding = receivableRows.reduce((sum, item) => sum + item.outstanding, 0);
 
   const reportCards = [
-    { id: 'financial' as const, title: 'Laporan Keuangan', description: 'Laba Rugi dan Neraca berdasarkan COA dan jurnal.', icon: Landmark },
-    { id: 'accounting' as const, title: 'Laporan Akuntansi', description: 'Daftar jurnal, buku besar dan neraca saldo.', icon: BookOpen },
+    { id: 'financial' as const, title: 'Laporan Keuangan', description: 'Laba Rugi, Neraca dan Neraca Saldo berdasarkan COA dan jurnal.', icon: Landmark },
+    { id: 'accounting' as const, title: 'Laporan Buku Besar', description: 'Daftar jurnal dan buku besar per akun.', icon: BookOpen },
     { id: 'tbs' as const, title: 'Laporan Panen dan TBS', description: 'Tonase, pendapatan, biaya langsung dan margin per kebun.', icon: Sprout },
     { id: 'purchases' as const, title: 'Laporan Pembelian', description: 'Invoice supplier, pembayaran dan saldo hutang pembelian.', icon: ShoppingCart },
     { id: 'receivables' as const, title: 'Laporan Piutang Karyawan', description: 'Nilai piutang, potongan payroll dan saldo tersisa.', icon: Wallet },
@@ -1741,7 +1742,7 @@ function Reports({ data }: { data: Bootstrap }) {
 
   const pageTitle: Record<Exclude<ReportPage, 'hub'>, string> = {
     financial: 'Laporan Keuangan',
-    accounting: 'Laporan Akuntansi',
+    accounting: 'Laporan Buku Besar',
     tbs: 'Laporan Panen dan TBS',
     purchases: 'Laporan Pembelian',
     receivables: 'Laporan Piutang Karyawan',
@@ -1773,10 +1774,10 @@ function Reports({ data }: { data: Bootstrap }) {
                 {item.id === 'financial' ? <>
                   <button type="button" onClick={() => openFinancialReport('income')}><span className="report-submenu-mark">•</span><span>Laba Rugi Standar</span><ChevronRight size={16} /></button>
                   <button type="button" onClick={() => openFinancialReport('balance')}><span className="report-submenu-mark">•</span><span>Neraca</span><ChevronRight size={16} /></button>
+                  <button type="button" onClick={() => openAccountingReport('trial')}><span className="report-submenu-mark">•</span><span>Neraca Saldo</span><ChevronRight size={16} /></button>
                 </> : <>
                   <button type="button" onClick={() => openAccountingReport('journals')}><span className="report-submenu-mark">•</span><span>Daftar Jurnal</span><ChevronRight size={16} /></button>
                   <button type="button" onClick={() => openAccountingReport('ledger')}><span className="report-submenu-mark">•</span><span>Buku Besar</span><ChevronRight size={16} /></button>
-                  <button type="button" onClick={() => openAccountingReport('trial')}><span className="report-submenu-mark">•</span><span>Neraca Saldo</span><ChevronRight size={16} /></button>
                 </>}
               </div>}
             </div>;
@@ -1799,7 +1800,7 @@ function Reports({ data }: { data: Bootstrap }) {
 
   if (reportPage === 'accounting') return <div className="stack">
     <section className="master-detail-nav">
-      <div><span>Laporan</span><ChevronRight size={14} /><span>Laporan Akuntansi</span><ChevronRight size={14} /><strong>{accountingReportMode === 'journals' ? 'Daftar Jurnal' : accountingReportMode === 'ledger' ? 'Buku Besar' : 'Neraca Saldo'}</strong></div>
+      <div><span>Laporan</span><ChevronRight size={14} /><span>{accountingReportMode === 'trial' ? 'Laporan Keuangan' : 'Laporan Buku Besar'}</span><ChevronRight size={14} /><strong>{accountingReportMode === 'journals' ? 'Daftar Jurnal' : accountingReportMode === 'ledger' ? 'Buku Besar' : 'Neraca Saldo'}</strong></div>
       <button type="button" className="secondary small-btn" onClick={() => changeReportPage('hub')}>← Kembali ke Laporan</button>
     </section>
     <AccountingReports data={data} mode={accountingReportMode} />
