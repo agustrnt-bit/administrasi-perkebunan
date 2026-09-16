@@ -214,7 +214,7 @@ export default function FinancialStatements({ data, mode }: Props) {
     <div className="panel-head wrap">
       <div>
         <span className="eyebrow dark">Laporan Keuangan</span>
-        <h3>{mode === 'income' ? 'Laporan Laba Rugi & Penghasilan Komprehensif Lain' : 'Laporan Posisi Keuangan (Neraca)'}</h3>
+        <h3>{mode === 'income' ? 'Laba Rugi Standar' : 'Neraca'}</h3>
         <p>{mode === 'income' ? 'Disusun dari akun Pendapatan dan Beban pada jurnal double-entry.' : 'Disusun dari saldo Aset, Liabilitas, dan Ekuitas sampai akhir periode.'}</p>
       </div>
       <div className="filters">

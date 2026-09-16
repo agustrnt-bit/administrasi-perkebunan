@@ -1769,14 +1769,11 @@ function Reports({ data }: { data: Bootstrap }) {
 
   const detailNav = <section className="master-detail-nav"><div><span>Laporan</span><ChevronRight size={14} /><strong>{pageTitle[reportPage]}</strong></div><button type="button" className="secondary small-btn" onClick={() => changeReportPage('hub')}>← Kembali ke Laporan</button></section>;
 
+  // v86-report-detail-cleanup
   if (reportPage === 'financial') return <div className="stack">
-    {detailNav}
-    <section className="panel tbs-header">
-      <div><span className="eyebrow dark">Laporan Keuangan</span><h2>Laporan Keuangan</h2><p>Laporan formal disusun dari COA dan jurnal yang telah diposting.</p></div>
-      <div className="mode-tabs report-tabs financial-report-tabs">
-        <button type="button" className={reportMode === 'income' ? 'active' : ''} onClick={() => changeReportMode('income')}><BookOpen size={16} /> Laba Rugi</button>
-        <button type="button" className={reportMode === 'balance' ? 'active' : ''} onClick={() => changeReportMode('balance')}><Landmark size={16} /> Neraca</button>
-      </div>
+    <section className="master-detail-nav">
+      <div><span>Laporan</span><ChevronRight size={14} /><span>Laporan Keuangan</span><ChevronRight size={14} /><strong>{reportMode === 'income' ? 'Laba Rugi Standar' : 'Neraca'}</strong></div>
+      <button type="button" className="secondary small-btn" onClick={() => changeReportPage('hub')}>← Kembali ke Laporan</button>
     </section>
     <FinancialStatements data={data} mode={reportMode} />
   </div>;
