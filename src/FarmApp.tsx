@@ -1609,6 +1609,13 @@ function Reports({ data }: { data: Bootstrap }) {
     storeChoice(reportModeStorageKey, nextMode);
   };
 
+  // v85-report-card-submenu
+  const [expandedReportCard, setExpandedReportCard] = useState<ReportPage | null>(null);
+  const openFinancialReport = (nextMode: (typeof reportModeOptions)[number]) => {
+    changeReportMode(nextMode);
+    changeReportPage('financial');
+  };
+
   type InventoryReportGroup = { id: string; code: string; name: string };
   type InventoryReportUnit = { id: string; code: string; name: string };
   type InventoryReportItem = { id: string; code: string; name: string; groupId: string; unitId: string; currentQuantity: number; averageCost: number; stockValue: number; active: boolean };
@@ -1737,11 +1744,23 @@ function Reports({ data }: { data: Bootstrap }) {
         <div className="master-hub-grid">
           {reportCards.map(item => {
             const Icon = item.icon;
-            return <button key={item.id} type="button" className="master-hub-card" onClick={() => changeReportPage(item.id)}>
+            if (item.id !== 'financial') return <button key={item.id} type="button" className="master-hub-card" onClick={() => changeReportPage(item.id)}>
               <span className="master-hub-card-icon"><Icon size={22} /></span>
               <span className="master-hub-card-copy"><strong>{item.title}</strong><small>{item.description}</small></span>
               <ChevronRight size={18} />
             </button>;
+            const expanded = expandedReportCard === 'financial';
+            return <div key={item.id} className={`report-hub-card-wrap ${expanded ? 'expanded' : ''}`}>
+              <button type="button" className="master-hub-card report-hub-card-toggle" aria-expanded={expanded} onClick={() => setExpandedReportCard(current => current === 'financial' ? null : 'financial')}>
+                <span className="master-hub-card-icon"><Icon size={22} /></span>
+                <span className="master-hub-card-copy"><strong>{item.title}</strong><small>{item.description}</small></span>
+                <ChevronRight size={18} className={`report-hub-chevron ${expanded ? 'open' : ''}`} />
+              </button>
+              {expanded && <div className="report-submenu">
+                <button type="button" onClick={() => openFinancialReport('income')}><span className="report-submenu-mark">•</span><span>Laba Rugi Standar</span><ChevronRight size={16} /></button>
+                <button type="button" onClick={() => openFinancialReport('balance')}><span className="report-submenu-mark">•</span><span>Neraca</span><ChevronRight size={16} /></button>
+              </div>}
+            </div>;
           })}
         </div>
       </section>

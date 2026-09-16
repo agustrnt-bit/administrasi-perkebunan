@@ -990,3 +990,70 @@ tbody tr:hover { background: #fafbf9; }
 .company-delete-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .danger-note { border-color: #eed4d0; background: #fff5f3; color: #8d463f; }
 @media (max-width: 720px) { .company-danger-zone .panel-head { display: grid; gap: 12px; } .danger-button { width: 100%; } .company-delete-actions > button { flex: 1 1 140px; } }
+
+
+/* v85-readable-typography-and-report-menu */
+body { font-size: 14px; }
+.sidebar nav button { font-size: 13px; }
+.brand strong { font-size: 16px; }
+.brand span { font-size: 13px; }
+.workspace-mini span { font-size: 11px; }
+.workspace-mini strong { font-size: 13px; }
+.workspace-mini b { font-size: 12px; }
+.user-meta strong { font-size: 13px; }
+.user-meta span { font-size: 12px; }
+.topbar h1 { font-size: 22px; }
+.topbar p { font-size: 13px; }
+.hero h2 { font-size: 29px; }
+.hero p { font-size: 14px; }
+.eyebrow { font-size: 11px; }
+.primary, .secondary { font-size: 13px; }
+.small-btn { font-size: 12px; }
+.metric span { font-size: 12px; }
+.metric strong { font-size: 21px; }
+.metric small { font-size: 11px; }
+.panel-head h3 { font-size: 17px; }
+.panel-head p { font-size: 13px; line-height: 1.5; }
+.text-btn { font-size: 13px; }
+.field > span { font-size: 12px; }
+.field input, .field select, .field textarea, .filters input, .filters select, .compact-select, .transaction-filters input, .transaction-filters select, .search-input { font-size: 14px; }
+.mode-tabs button { font-size: 13px; }
+.notice, .inline-error { font-size: 13px; }
+.empty { font-size: 13px; }
+.master-hub-group-head strong { font-size: 14px; }
+.master-hub-group-head span { font-size: 12px; }
+.master-hub-card-copy strong { font-size: 15px; }
+.master-hub-card-copy small { font-size: 12px; line-height: 1.5; }
+.master-detail-nav > div { font-size: 12px; }
+.master-detail-nav strong { font-size: 13px; }
+.account-row strong, .recent-row strong, .master-row strong, .member-row strong, .invite-row strong { font-size: 13px; }
+.account-row span, .recent-row span, .master-row span, .member-row span, .invite-row span { font-size: 12px; }
+.account-row b, .recent-row b, .master-row b, .member-row b { font-size: 13px; }
+.muted { font-size: 12px; }
+.report-summary span { font-size: 12px; }
+.report-summary strong { font-size: 18px; }
+.fs-filter > span { font-size: 11px; }
+.fs-period-head { font-size: 12px; padding-top: 12px; padding-bottom: 12px; }
+.fs-row { font-size: 13px; padding-top: 10px; padding-bottom: 10px; line-height: 1.4; }
+.fs-subtitle { font-size: 13px; }
+.fs-group-title { font-size: 14px; padding-top: 13px; padding-bottom: 13px; }
+.fs-total { font-size: 13px; padding-top: 12px; padding-bottom: 12px; }
+.fs-grand { font-size: 14px; padding-top: 14px; padding-bottom: 14px; }
+.report-hub-card-wrap { min-width: 0; display: grid; align-content: start; }
+.report-hub-card-wrap .master-hub-card { width: 100%; }
+.report-hub-card-wrap.expanded .master-hub-card { border-color: #a9c2ad; border-bottom-left-radius: 11px; border-bottom-right-radius: 11px; }
+.report-hub-chevron { transition: transform .18s ease; }
+.report-hub-chevron.open { transform: rotate(90deg); }
+.report-submenu { margin-top: 7px; padding: 6px; display: grid; gap: 3px; background: #fff; border: 1px solid #dfe7dc; border-radius: 12px; box-shadow: 0 8px 20px rgba(37,76,51,.06); }
+.report-submenu button { width: 100%; border: 0; background: transparent; color: #31533e; border-radius: 9px; padding: 11px 10px; display: grid; grid-template-columns: 16px minmax(0,1fr) 18px; align-items: center; gap: 8px; text-align: left; font-size: 13px; cursor: pointer; }
+.report-submenu button:hover { background: #f1f6ee; }
+.report-submenu button > svg { color: #91a096; }
+.report-submenu-mark { color: #7fa78b; font-size: 18px; line-height: 1; }
+@media (max-width: 760px) {
+  body { font-size: 13px; }
+  .topbar h1 { font-size: 20px; }
+  .panel-head h3 { font-size: 16px; }
+  .field input, .field select, .field textarea, .filters input, .filters select, .compact-select, .transaction-filters input, .transaction-filters select, .search-input { font-size: 16px; }
+  .fs-row { font-size: 12px; }
+  .master-hub-card-copy strong { font-size: 14px; }
+}
