@@ -160,8 +160,8 @@ if [ -n "$ACTIVE_WORKSPACE_ID" ]; then
     FROM app_records m
     WHERE m.table_name='accounting_system_mappings:$ACTIVE_WORKSPACE_ID';"
 
-  psql_db "SELECT record->>'key' AS mapping_key,
-                  record->>'accountId' AS account_id,
+  psql_db "SELECT m.record->>'key' AS mapping_key,
+                  m.record->>'accountId' AS account_id,
                   COALESCE(coa.record->>'code','') AS coa_code,
                   COALESCE(coa.record->>'name','') AS coa_name
            FROM app_records m
@@ -169,7 +169,7 @@ if [ -n "$ACTIVE_WORKSPACE_ID" ]; then
              ON coa.table_name='accounting_accounts:$ACTIVE_WORKSPACE_ID'
             AND coa.id=(m.record->>'accountId')
            WHERE m.table_name='accounting_system_mappings:$ACTIVE_WORKSPACE_ID'
-           ORDER BY record->>'key';"
+           ORDER BY m.record->>'key';"
 fi
 
 section 11 "Periode akuntansi"
