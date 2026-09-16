@@ -69,6 +69,8 @@ export default function FinancialStatements({ data, mode }: Props) {
   const [incomeBasis, setIncomeBasis] = useState<'MONTH' | 'YTD'>('YTD');
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  // v87-hide-zero-financial-lines
+  const [hideZeroRows, setHideZeroRows] = useState(true);
 
   useEffect(() => {
     const load = async () => {
@@ -178,28 +180,35 @@ export default function FinancialStatements({ data, mode }: Props) {
   const currentBalanced = Math.abs(currentAssets - currentRightSide) < 1;
   const compareBalanced = Math.abs(compareAssets - compareRightSide) < 1;
 
+  const isVisibleAmount = (currentValue: number, compareValue: number) => !hideZeroRows || Math.abs(currentValue) >= 0.5 || Math.abs(compareValue) >= 0.5;
+
   const renderGroup = (group: AccountingGroup, title: string, current: ValueMap, compare: ValueMap) => {
     const level2Rows = accounts.filter(account => account.active !== false && account.group === group && account.level === 2).sort((a, b) => a.code.localeCompare(b.code));
+    const renderedLevel2 = level2Rows.map(level2 => {
+      const level3Rows = accounts.filter(account => account.active !== false && account.parentId === level2.id && account.level === 3).sort((a, b) => a.code.localeCompare(b.code));
+      const renderedLevel3 = level3Rows.map(level3 => {
+        const leaves = accounts.filter(account => posting(account) && account.parentId === level3.id).sort((a, b) => a.code.localeCompare(b.code));
+        const currentLevel3 = leaves.reduce((sum, account) => sum + (current.get(account.id) || 0), 0);
+        const compareLevel3 = leaves.reduce((sum, account) => sum + (compare.get(account.id) || 0), 0);
+        const visibleLeaves = leaves.filter(account => isVisibleAmount(current.get(account.id) || 0, compare.get(account.id) || 0));
+        if (hideZeroRows && visibleLeaves.length === 0 && !isVisibleAmount(currentLevel3, compareLevel3)) return null;
+        return <div key={level3.id}>
+          <div className="fs-row fs-level3"><span>{level3.code} · {level3.name}</span><strong>{idr.format(currentLevel3)}</strong><strong>{idr.format(compareLevel3)}</strong></div>
+          {visibleLeaves.map(account => <div className="fs-row fs-level4" key={account.id}><span><b>{account.code}</b> {account.name}</span><span>{idr.format(current.get(account.id) || 0)}</span><span>{idr.format(compare.get(account.id) || 0)}</span></div>)}
+        </div>;
+      }).filter(Boolean);
+      const level2Leaves = level3Rows.flatMap(level3 => accounts.filter(account => posting(account) && account.parentId === level3.id));
+      const currentLevel2 = level2Leaves.reduce((sum, account) => sum + (current.get(account.id) || 0), 0);
+      const compareLevel2 = level2Leaves.reduce((sum, account) => sum + (compare.get(account.id) || 0), 0);
+      if (hideZeroRows && renderedLevel3.length === 0 && !isVisibleAmount(currentLevel2, compareLevel2)) return null;
+      return <div className="fs-level2" key={level2.id}>
+        <div className="fs-row fs-subtitle"><span>{level2.code} · {level2.name}</span><strong>{idr.format(currentLevel2)}</strong><strong>{idr.format(compareLevel2)}</strong></div>
+        {renderedLevel3}
+      </div>;
+    }).filter(Boolean);
     return <div className="fs-group">
       <div className="fs-group-title"><strong>{title}</strong><span>{idr.format(sumMap(current, accounts, group))}</span><span>{idr.format(sumMap(compare, accounts, group))}</span></div>
-      {level2Rows.map(level2 => {
-        const level3Rows = accounts.filter(account => account.active !== false && account.parentId === level2.id && account.level === 3).sort((a, b) => a.code.localeCompare(b.code));
-        const level2Leaves = level3Rows.flatMap(level3 => accounts.filter(account => posting(account) && account.parentId === level3.id));
-        const currentLevel2 = level2Leaves.reduce((sum, account) => sum + (current.get(account.id) || 0), 0);
-        const compareLevel2 = level2Leaves.reduce((sum, account) => sum + (compare.get(account.id) || 0), 0);
-        return <div className="fs-level2" key={level2.id}>
-          <div className="fs-row fs-subtitle"><span>{level2.code} · {level2.name}</span><strong>{idr.format(currentLevel2)}</strong><strong>{idr.format(compareLevel2)}</strong></div>
-          {level3Rows.map(level3 => {
-            const leaves = accounts.filter(account => posting(account) && account.parentId === level3.id).sort((a, b) => a.code.localeCompare(b.code));
-            const currentLevel3 = leaves.reduce((sum, account) => sum + (current.get(account.id) || 0), 0);
-            const compareLevel3 = leaves.reduce((sum, account) => sum + (compare.get(account.id) || 0), 0);
-            return <div key={level3.id}>
-              <div className="fs-row fs-level3"><span>{level3.code} · {level3.name}</span><strong>{idr.format(currentLevel3)}</strong><strong>{idr.format(compareLevel3)}</strong></div>
-              {leaves.map(account => <div className="fs-row fs-level4" key={account.id}><span><b>{account.code}</b> {account.name}</span><span>{idr.format(current.get(account.id) || 0)}</span><span>{idr.format(compare.get(account.id) || 0)}</span></div>)}
-            </div>;
-          })}
-        </div>;
-      })}
+      {renderedLevel2}
     </div>;
   };
 
@@ -220,6 +229,7 @@ export default function FinancialStatements({ data, mode }: Props) {
       <div className="filters">
         <label className="fs-filter"><span>Periode</span><input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>
         <label className="fs-filter"><span>Pembanding</span><input type="month" value={compareMonth} onChange={event => setCompareMonth(event.target.value)} /></label>
+        <label className="fs-zero-toggle"><input type="checkbox" checked={hideZeroRows} onChange={event => setHideZeroRows(event.target.checked)} /><span>Sembunyikan akun Rp0</span></label>
         {mode === 'income' && <label className="fs-filter"><span>Cakupan</span><select value={incomeBasis} onChange={event => setIncomeBasis(event.target.value as 'MONTH' | 'YTD')}><option value="YTD">YTD Tahun Buku</option><option value="MONTH">Bulanan</option></select></label>}
       </div>
     </div>

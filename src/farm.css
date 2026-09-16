@@ -1057,3 +1057,9 @@ body { font-size: 14px; }
   .fs-row { font-size: 12px; }
   .master-hub-card-copy strong { font-size: 14px; }
 }
+
+
+/* v87-hide-zero-financial-lines */
+.fs-zero-toggle { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 10px; color: #4f5f55; font-size: 12px; white-space: nowrap; }
+.fs-zero-toggle input { width: 16px; height: 16px; accent-color: #315b43; }
+@media (max-width: 760px) { .fs-zero-toggle { min-height: 38px; padding: 0 2px; white-space: normal; } }
