@@ -145,7 +145,7 @@ psql_db "SELECT 'kebun' AS kind, id, record->>'code' AS natural_key, record->>'n
          SELECT 'mill', id, lower(record->>'name'), record->>'name', ''
          FROM app_records WHERE table_name='mills:$SOURCE_WORKSPACE_ID'
          UNION ALL
-         SELECT 'account', id, lower(record->>'name') || '|' || record->>'type', record->>'name', ''
+         SELECT 'account', id, lower(record->>'name') || '|' || (record->>'type'), record->>'name', ''
          FROM app_records WHERE table_name='accounts:$SOURCE_WORKSPACE_ID'
          UNION ALL
          SELECT 'vehicle', id, record->>'plateNumber', COALESCE(record->>'name',''), COALESCE(record->>'supplierId','')
