@@ -54,7 +54,7 @@ fi
 echo "[2/5] Menjalankan migrasi dalam satu transaksi database..."
 docker compose exec -T db sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off' <<SQL
 BEGIN;
-SELECT pg_advisory_xact_lock(hashtext('legacy-sawit-sw-master-migration-v1'));
+SELECT pg_advisory_xact_lock(hashtext('legacy-sawit-sw-master-migration-v2'));
 
 DO \$\$
 DECLARE
@@ -122,20 +122,54 @@ BEGIN
 END
 \$\$;
 
-CREATE TEMP TABLE target_cash_parent(code text PRIMARY KEY, id text NOT NULL) ON COMMIT DROP;
-INSERT INTO target_cash_parent(code,id)
-SELECT record->>'code', id
-FROM app_records
-WHERE table_name='accounting_accounts:$TARGET_WORKSPACE_ID'
-  AND record->>'code' IN ('1101','1102')
-  AND COALESCE(record->>'level','')='3'
-  AND lower(COALESCE(record->>'posting','false'))='false';
+-- Resolve parent COA kas/bank berdasarkan parent source yang sama di template target.
+-- Tidak lagi mengasumsikan kode parent 1101/1102 karena struktur hirarki template dapat berbeda.
+CREATE TEMP TABLE target_cash_parent(
+  source_cash_id text PRIMARY KEY,
+  source_parent_id text NOT NULL,
+  source_parent_code text NOT NULL,
+  source_parent_name text NOT NULL,
+  target_parent_id text NOT NULL
+) ON COMMIT DROP;
+
+INSERT INTO target_cash_parent(source_cash_id, source_parent_id, source_parent_code, source_parent_name, target_parent_id)
+SELECT cash.id,
+       src_parent.id,
+       src_parent.record->>'code',
+       src_parent.record->>'name',
+       tgt_parent.id
+FROM app_records cash
+JOIN app_records src_parent
+  ON src_parent.table_name='accounting_accounts:$SOURCE_WORKSPACE_ID'
+ AND src_parent.id=cash.record->>'parentId'
+JOIN app_records tgt_parent
+  ON tgt_parent.table_name='accounting_accounts:$TARGET_WORKSPACE_ID'
+ AND tgt_parent.record->>'code'=src_parent.record->>'code'
+ AND COALESCE(tgt_parent.record->>'level','')=COALESCE(src_parent.record->>'level','')
+ AND COALESCE(tgt_parent.record->>'name','')=COALESCE(src_parent.record->>'name','')
+ AND lower(COALESCE(tgt_parent.record->>'posting','false'))=lower(COALESCE(src_parent.record->>'posting','false'))
+WHERE cash.table_name='accounting_accounts:$SOURCE_WORKSPACE_ID'
+  AND COALESCE(cash.record->>'systemKey','') LIKE 'CASH:%';
 
 DO \$\$
-DECLARE n integer;
+DECLARE
+  source_cash_count integer;
+  mapped_parent_count integer;
+  n integer;
 BEGIN
-  SELECT COUNT(*) INTO n FROM target_cash_parent;
-  IF n <> 2 THEN RAISE EXCEPTION 'Parent COA target 1101/1102 tidak unik/lengkap. Found %.', n; END IF;
+  SELECT COUNT(*) INTO source_cash_count
+  FROM app_records
+  WHERE table_name='accounting_accounts:$SOURCE_WORKSPACE_ID'
+    AND COALESCE(record->>'systemKey','') LIKE 'CASH:%';
+
+  SELECT COUNT(*) INTO mapped_parent_count FROM target_cash_parent;
+  IF source_cash_count <> 2 THEN
+    RAISE EXCEPTION 'Source COA CASH berubah: expected 2, actual %', source_cash_count;
+  END IF;
+  IF mapped_parent_count <> source_cash_count THEN
+    RAISE EXCEPTION 'Parent COA kas/bank target belum dapat dipetakan lengkap: source cash %, mapped parent %', source_cash_count, mapped_parent_count;
+  END IF;
+
   SELECT COUNT(*) INTO n
   FROM app_records
   WHERE table_name='accounting_accounts:$TARGET_WORKSPACE_ID'
@@ -143,6 +177,10 @@ BEGIN
   IF n <> 0 THEN RAISE EXCEPTION 'Target sudah memiliki COA kas/bank dinamis (% rows). Migrasi dibatalkan.', n; END IF;
 END
 \$\$;
+
+SELECT source_cash_id, source_parent_code, source_parent_name, target_parent_id
+FROM target_cash_parent
+ORDER BY source_cash_id;
 
 -- Master independen. ID lama dipertahankan karena primary key app_records adalah (table_name,id),
 -- sehingga dependency lama tetap valid tetapi tetap terisolasi per workspace.
@@ -182,13 +220,12 @@ SELECT 'accounting_accounts:$TARGET_WORKSPACE_ID', s.id,
        jsonb_set(
          CASE WHEN s.record ? 'workspaceId' THEN jsonb_set(s.record,'{workspaceId}',to_jsonb('$TARGET_WORKSPACE_ID'::text),false) ELSE s.record END,
          '{parentId}',
-         to_jsonb(p.id),
+         to_jsonb(p.target_parent_id),
          true
        ),
        s.created_at, s.updated_at
 FROM app_records s
-JOIN target_cash_parent p
-  ON p.code = CASE WHEN s.record->>'code' LIKE '1101.%' THEN '1101' ELSE '1102' END
+JOIN target_cash_parent p ON p.source_cash_id=s.id
 WHERE s.table_name='accounting_accounts:$SOURCE_WORKSPACE_ID'
   AND COALESCE(s.record->>'systemKey','') LIKE 'CASH:%';
 
