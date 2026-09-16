@@ -43,6 +43,7 @@ import EmployeeReceivables from './EmployeeReceivables';
 import PurchaseInvoices from './PurchaseInvoices';
 import AccountingModule, { type AccountingAccount } from './AccountingModule';
 import FinancialStatements from './FinancialStatements';
+import AccountingReports, { type AccountingReportMode } from './AccountingReports';
 import InventoryMasters from './InventoryMasters';
 import InventoryUsage from './InventoryUsage';
 import FixedAssets from './FixedAssets';
@@ -1593,7 +1594,7 @@ function CashBankLedger({ data }: { data: Bootstrap }) {
 
 function Reports({ data }: { data: Bootstrap }) {
   const reportPageStorageKey = 'perkebunan.navigation.reports.page';
-  const reportPages = ['hub', 'financial', 'tbs', 'purchases', 'receivables', 'inventory', 'assets'] as const;
+  const reportPages = ['hub', 'financial', 'accounting', 'tbs', 'purchases', 'receivables', 'inventory', 'assets'] as const;
   type ReportPage = (typeof reportPages)[number];
   const [reportPage, setReportPage] = useState<ReportPage>('hub');
   const changeReportPage = (nextPage: ReportPage) => {
@@ -1614,6 +1615,16 @@ function Reports({ data }: { data: Bootstrap }) {
   const openFinancialReport = (nextMode: (typeof reportModeOptions)[number]) => {
     changeReportMode(nextMode);
     changeReportPage('financial');
+  };
+
+  // v88-move-accounting-reports
+  const accountingReportModeStorageKey = 'perkebunan.navigation.reports.accounting';
+  const accountingReportModeOptions = ['journals', 'ledger', 'trial'] as const;
+  const [accountingReportMode, setAccountingReportMode] = useState<AccountingReportMode>(() => readStoredChoice(accountingReportModeStorageKey, accountingReportModeOptions, 'journals'));
+  const openAccountingReport = (nextMode: AccountingReportMode) => {
+    setAccountingReportMode(nextMode);
+    storeChoice(accountingReportModeStorageKey, nextMode);
+    changeReportPage('accounting');
   };
 
   type InventoryReportGroup = { id: string; code: string; name: string };
@@ -1720,6 +1731,7 @@ function Reports({ data }: { data: Bootstrap }) {
 
   const reportCards = [
     { id: 'financial' as const, title: 'Laporan Keuangan', description: 'Laba Rugi dan Neraca berdasarkan COA dan jurnal.', icon: Landmark },
+    { id: 'accounting' as const, title: 'Laporan Akuntansi', description: 'Daftar jurnal, buku besar dan neraca saldo.', icon: BookOpen },
     { id: 'tbs' as const, title: 'Laporan Panen dan TBS', description: 'Tonase, pendapatan, biaya langsung dan margin per kebun.', icon: Sprout },
     { id: 'purchases' as const, title: 'Laporan Pembelian', description: 'Invoice supplier, pembayaran dan saldo hutang pembelian.', icon: ShoppingCart },
     { id: 'receivables' as const, title: 'Laporan Piutang Karyawan', description: 'Nilai piutang, potongan payroll dan saldo tersisa.', icon: Wallet },
@@ -1729,6 +1741,7 @@ function Reports({ data }: { data: Bootstrap }) {
 
   const pageTitle: Record<Exclude<ReportPage, 'hub'>, string> = {
     financial: 'Laporan Keuangan',
+    accounting: 'Laporan Akuntansi',
     tbs: 'Laporan Panen dan TBS',
     purchases: 'Laporan Pembelian',
     receivables: 'Laporan Piutang Karyawan',
@@ -1744,21 +1757,27 @@ function Reports({ data }: { data: Bootstrap }) {
         <div className="master-hub-grid">
           {reportCards.map(item => {
             const Icon = item.icon;
-            if (item.id !== 'financial') return <button key={item.id} type="button" className="master-hub-card" onClick={() => changeReportPage(item.id)}>
+            if (item.id !== 'financial' && item.id !== 'accounting') return <button key={item.id} type="button" className="master-hub-card" onClick={() => changeReportPage(item.id)}>
               <span className="master-hub-card-icon"><Icon size={22} /></span>
               <span className="master-hub-card-copy"><strong>{item.title}</strong><small>{item.description}</small></span>
               <ChevronRight size={18} />
             </button>;
-            const expanded = expandedReportCard === 'financial';
+            const expanded = expandedReportCard === item.id;
             return <div key={item.id} className={`report-hub-card-wrap ${expanded ? 'expanded' : ''}`}>
-              <button type="button" className="master-hub-card report-hub-card-toggle" aria-expanded={expanded} onClick={() => setExpandedReportCard(current => current === 'financial' ? null : 'financial')}>
+              <button type="button" className="master-hub-card report-hub-card-toggle" aria-expanded={expanded} onClick={() => setExpandedReportCard(current => current === item.id ? null : item.id)}>
                 <span className="master-hub-card-icon"><Icon size={22} /></span>
                 <span className="master-hub-card-copy"><strong>{item.title}</strong><small>{item.description}</small></span>
                 <ChevronRight size={18} className={`report-hub-chevron ${expanded ? 'open' : ''}`} />
               </button>
               {expanded && <div className="report-submenu">
-                <button type="button" onClick={() => openFinancialReport('income')}><span className="report-submenu-mark">•</span><span>Laba Rugi Standar</span><ChevronRight size={16} /></button>
-                <button type="button" onClick={() => openFinancialReport('balance')}><span className="report-submenu-mark">•</span><span>Neraca</span><ChevronRight size={16} /></button>
+                {item.id === 'financial' ? <>
+                  <button type="button" onClick={() => openFinancialReport('income')}><span className="report-submenu-mark">•</span><span>Laba Rugi Standar</span><ChevronRight size={16} /></button>
+                  <button type="button" onClick={() => openFinancialReport('balance')}><span className="report-submenu-mark">•</span><span>Neraca</span><ChevronRight size={16} /></button>
+                </> : <>
+                  <button type="button" onClick={() => openAccountingReport('journals')}><span className="report-submenu-mark">•</span><span>Daftar Jurnal</span><ChevronRight size={16} /></button>
+                  <button type="button" onClick={() => openAccountingReport('ledger')}><span className="report-submenu-mark">•</span><span>Buku Besar</span><ChevronRight size={16} /></button>
+                  <button type="button" onClick={() => openAccountingReport('trial')}><span className="report-submenu-mark">•</span><span>Neraca Saldo</span><ChevronRight size={16} /></button>
+                </>}
               </div>}
             </div>;
           })}
@@ -1776,6 +1795,14 @@ function Reports({ data }: { data: Bootstrap }) {
       <button type="button" className="secondary small-btn" onClick={() => changeReportPage('hub')}>← Kembali ke Laporan</button>
     </section>
     <FinancialStatements data={data} mode={reportMode} />
+  </div>;
+
+  if (reportPage === 'accounting') return <div className="stack">
+    <section className="master-detail-nav">
+      <div><span>Laporan</span><ChevronRight size={14} /><span>Laporan Akuntansi</span><ChevronRight size={14} /><strong>{accountingReportMode === 'journals' ? 'Daftar Jurnal' : accountingReportMode === 'ledger' ? 'Buku Besar' : 'Neraca Saldo'}</strong></div>
+      <button type="button" className="secondary small-btn" onClick={() => changeReportPage('hub')}>← Kembali ke Laporan</button>
+    </section>
+    <AccountingReports data={data} mode={accountingReportMode} />
   </div>;
 
   if (reportPage === 'tbs') return <div className="stack">
