@@ -976,3 +976,17 @@ tbody tr:hover { background: #fafbf9; }
 
 .inventory-transfer-line-grid { display:grid; grid-template-columns: 1.35fr .8fr 1fr; gap:12px; align-items:end; }
 @media (max-width:760px){ .inventory-transfer-line-grid { grid-template-columns:1fr; } }
+
+
+/* v4.15 company deletion */
+.company-danger-zone { border: 1px solid #f0c7c2; background: #fffafa; }
+.company-danger-zone .panel-head { align-items: flex-start; }
+.company-danger-zone h3 { color: #9f2f25; }
+.company-danger-zone .panel-head p { max-width: 760px; }
+.danger-button { border: 0; border-radius: 10px; background: #b33a2f; color: #fff; min-height: 38px; padding: 0 14px; font: inherit; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; }
+.danger-button:hover:not(:disabled) { background: #942d24; }
+.danger-button:disabled { opacity: .45; cursor: not-allowed; }
+.company-delete-confirmation { margin-top: 14px; padding-top: 14px; border-top: 1px solid #efd9d6; display: grid; gap: 12px; max-width: 760px; }
+.company-delete-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.danger-note { border-color: #eed4d0; background: #fff5f3; color: #8d463f; }
+@media (max-width: 720px) { .company-danger-zone .panel-head { display: grid; gap: 12px; } .danger-button { width: 100%; } .company-delete-actions > button { flex: 1 1 140px; } }

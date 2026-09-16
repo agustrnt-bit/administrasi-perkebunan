@@ -1,4 +1,4 @@
-import { db, router, json, error, requireAuth, storage } from './localSdk';
+import { db, router, json, error, requireAuth, storage, backupAndDeleteWorkspace } from './localSdk';
 import { referencePlantationAdditions } from './plantationCoa';
 
 type Role = 'OWNER' | 'ADMIN_PUSAT' | 'FINANCE' | 'ADMIN_KEBUN' | 'VIEWER';
@@ -3987,6 +3987,39 @@ export const handler = router({
       return json({ profile });
     },
   ],
+  'POST /api/workspace/delete': [
+    requireAuth(),
+    async ctx => {
+      const wc = await workspaceContext(ctx.user!);
+      if (wc.membership.role !== 'OWNER') return error('Hanya Owner yang dapat menghapus perusahaan.', 403);
+      if (wc.memberships.length <= 1) {
+        return error('Perusahaan terakhir tidak dapat dihapus. Buat atau gabung ke perusahaan lain terlebih dahulu.', 409);
+      }
+
+      const metaRows = (await db.list<WorkspaceMeta>(metaTable(wc.workspaceId), { limit: 1 })).items;
+      const companyName = (metaRows[0]?.name || wc.workspaceName).trim();
+      const body = objectBody(ctx.body);
+      const confirmationName = text(body.confirmationName);
+      if (!confirmationName || confirmationName !== companyName) {
+        return error('Nama perusahaan untuk konfirmasi belum sesuai.', 400);
+      }
+
+      const result = await backupAndDeleteWorkspace(wc.workspaceId, {
+        workspaceName: companyName,
+        deletedBy: ctx.user!.userId,
+      });
+
+      return json({
+        deleted: true,
+        workspaceId: wc.workspaceId,
+        workspaceName: companyName,
+        deletedCount: result.deletedCount,
+      });
+    },
+  ],
+
+/* v4.15 company deletion */
+
   'POST /api/workspace/create': [
     requireAuth(),
     async ctx => {

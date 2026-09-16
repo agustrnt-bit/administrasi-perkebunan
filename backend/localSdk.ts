@@ -182,6 +182,58 @@ function safeStoragePath(relative: string) {
   return { normalized, resolved };
 }
 
+export async function backupAndDeleteWorkspace(
+  workspaceId: string,
+  details: { workspaceName: string; deletedBy: string }
+) {
+  const normalizedId = workspaceId.trim();
+  if (!/^[A-Za-z0-9._-]{1,160}$/.test(normalizedId)) throw new Error('Workspace ID tidak valid.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const rows = await client.query<{ table_name: string; id: string; record: unknown; created_at: Date; updated_at: Date }>(
+      `SELECT table_name, id, record, created_at, updated_at
+       FROM app_records
+       WHERE RIGHT(table_name, LENGTH($1) + 1) = ':' || $1
+          OR record->>'workspaceId' = $1
+          OR record->>'activeWorkspaceId' = $1
+       FOR UPDATE`,
+      [normalizedId]
+    );
+
+    const backupDir = path.join(storageRoot, 'workspace-deletions');
+    await fs.mkdir(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `${stamp}-${normalizedId}.json`;
+    const backupPayload = {
+      version: 1,
+      workspaceId: normalizedId,
+      workspaceName: details.workspaceName,
+      deletedBy: details.deletedBy,
+      deletedAt: new Date().toISOString(),
+      rows: rows.rows,
+    };
+    await fs.writeFile(path.join(backupDir, fileName), JSON.stringify(backupPayload));
+
+    const deleted = await client.query(
+      `DELETE FROM app_records
+       WHERE RIGHT(table_name, LENGTH($1) + 1) = ':' || $1
+          OR record->>'workspaceId' = $1
+          OR record->>'activeWorkspaceId' = $1`,
+      [normalizedId]
+    );
+    await client.query('COMMIT');
+    return { deletedCount: deleted.rowCount || 0, backupPath: `workspace-deletions/${fileName}` };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/* v4.15 company deletion */
+
 export const storage = {
   async write(entries: Array<{ path: string; content: string; contentType?: string }>) {
     const results: boolean[] = [];

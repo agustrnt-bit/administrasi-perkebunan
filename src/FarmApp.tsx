@@ -565,7 +565,7 @@ function FarmApp() {
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Sprout size={24} /></div>
-            <div><strong>Administrasi</strong><span>Perkebunan · v4.14.1</span></div>
+            <div><strong>Administrasi</strong><span>Perkebunan · v4.15.0</span></div>
         </div>
         <button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Tutup menu">
           <X size={20} />
@@ -651,6 +651,13 @@ function FarmApp() {
               reload={loadData}
               flash={flash}
               showError={setErrorMessage}
+              onCompanyDeleted={() => {
+                clearCompanySession();
+                setCompanySelected(false);
+                setTab('dashboard');
+                storeChoice(mainTabStorageKey, 'dashboard');
+                if (typeof window !== 'undefined') window.history.replaceState({}, '', '/');
+              }}
             />
           )}
         </div>
@@ -1980,13 +1987,14 @@ function MasterData({ data, reload, flash, showError }: { data: Bootstrap; reloa
 }
 
 function CompanyPanel({
-  user, data, reload, flash, showError,
+  user, data, reload, flash, showError, onCompanyDeleted,
 }: {
   user: User;
   data: Bootstrap;
   reload: () => Promise<void>;
   flash: (text: string) => void;
   showError: (text: string) => void;
+  onCompanyDeleted: () => void;
 }) {
   const defaultProfile: CompanyProfile = {
     name: data.workspace.name, shortName: '', businessType: '', npwp: '', nib: '', address: '', village: '', district: '', city: '', province: '', postalCode: '', phone: '', email: '', website: '', picName: '', picPosition: '', fiscalYearStartMonth: 1, currency: 'IDR', reportName: data.workspace.name, logoUrl: '',
@@ -1995,6 +2003,9 @@ function CompanyPanel({
   const [canEditProfile, setCanEditProfile] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deletingCompany, setDeletingCompany] = useState(false);
   const [coaStatus, setCoaStatus] = useState({ accounts: 0, mappings: 0 });
 
   const loadProfile = async () => {
@@ -2033,6 +2044,26 @@ function CompanyPanel({
       showError(apiError(err, 'Profil Perusahaan belum dapat disimpan.'));
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const deleteCompany = async () => {
+    if (data.workspace.role !== 'OWNER') return showError('Hanya Owner yang dapat menghapus perusahaan.');
+    const expectedName = (profile.name || data.workspace.name).trim();
+    if (data.workspaces.length <= 1) return showError('Buat atau gabung ke perusahaan lain terlebih dahulu sebelum menghapus perusahaan ini.');
+    if (deleteConfirmation.trim() !== expectedName) return showError('Ketik nama perusahaan persis seperti yang tampil untuk melanjutkan.');
+    try {
+      setDeletingCompany(true);
+      await api.post('/api/workspace/delete', { confirmationName: deleteConfirmation.trim() });
+      await reload();
+      setDeleteConfirmation('');
+      setDeleteOpen(false);
+      flash('Perusahaan berhasil dihapus.');
+      onCompanyDeleted();
+    } catch (err) {
+      showError(apiError(err, 'Perusahaan belum dapat dihapus.'));
+    } finally {
+      setDeletingCompany(false);
     }
   };
 
@@ -2091,6 +2122,26 @@ function CompanyPanel({
           <div className="notice">Status ini membantu screening awal. Kesiapan final tetap mengikuti validasi COA, Akun Penting, subledger, periode, dan Saldo Awal.</div>
         </section>
       </section>
+
+      {data.workspace.role === 'OWNER' && (
+        <section className="panel company-danger-zone">
+          <div className="panel-head">
+            <div><h3>Hapus Perusahaan</h3><p>Menghapus perusahaan aktif beserta seluruh master, transaksi, persediaan, jurnal, laporan, akses user, dan data terkait. Perusahaan lain tidak terpengaruh.</p></div>
+            {!deleteOpen && <button type="button" className="danger-button" disabled={data.workspaces.length <= 1} onClick={() => { setDeleteConfirmation(''); setDeleteOpen(true); }}><Trash2 size={16} /> Hapus Perusahaan</button>}
+          </div>
+          {data.workspaces.length <= 1 && <div className="notice danger-note">Perusahaan terakhir tidak dapat dihapus. Buat atau gabung ke perusahaan lain terlebih dahulu.</div>}
+          {deleteOpen && data.workspaces.length > 1 && (
+            <div className="company-delete-confirmation">
+              <div className="inline-error"><strong>Tindakan ini permanen.</strong> Backup internal dibuat sebelum data dihapus. Untuk konfirmasi, ketik nama perusahaan berikut: <strong>{profile.name || data.workspace.name}</strong></div>
+              <Field label="Ketik nama perusahaan"><input autoFocus value={deleteConfirmation} onChange={event => setDeleteConfirmation(event.target.value)} placeholder={profile.name || data.workspace.name} /></Field>
+              <div className="company-delete-actions">
+                <button type="button" className="secondary" disabled={deletingCompany} onClick={() => { setDeleteOpen(false); setDeleteConfirmation(''); }}>Batal</button>
+                <button type="button" className="danger-button" disabled={deletingCompany || deleteConfirmation.trim() !== (profile.name || data.workspace.name).trim()} onClick={() => void deleteCompany()}><Trash2 size={16} /> {deletingCompany ? 'Menghapus...' : 'Ya, Hapus Permanen'}</button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <AccessPanel user={user} data={data} reload={reload} flash={flash} showError={showError} />
     </div>
@@ -2250,3 +2301,5 @@ export default FarmApp;
 
 
 /* v4.14.1 refresh session restore splash */
+
+/* v4.15 company deletion */
